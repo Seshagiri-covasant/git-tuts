@@ -1,0 +1,509 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --background-dark: #121212;
+  --surface-dark-1: #1E1E1E; /* Main panel background */
+  --surface-dark-2: #2A2A2A; /* Card background */
+  --surface-dark-3: #333333; /* Input background */
+  --primary-accent: #7E57C2; /* A slightly softer, more modern purple */
+  --primary-accent-darker: #5E35B1;
+  --text-primary: #EAEAEA;
+  --text-secondary: #A0A0A0;
+  --border-color: #444444;
+  --error-color: #CF6679;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--background-dark);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === 2. MAIN APP LAYOUT & COLLAPSIBLE PANEL === */
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  position: relative;
+}
+.main-content-area {
+  flex-grow: 1;
+  position: relative;
+}
+.panel-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1001;
+  background-color: var(--primary-accent);
+  color: white;
+  border: none;
+  width: 30px;
+  height: 60px;
+  font-size: 2rem;
+  font-weight: 300;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 5px 0;
+  border-radius: 0 10px 10px 0;
+  transition: all 0.3s ease-in-out;
+  box-shadow: 2px 0 8px rgba(0,0,0,0.4);
+}
+.app-container.panel-open .panel-toggle { left: 450px; }
+.app-container.panel-closed .panel-toggle { left: 0; }
+
+/* === 3. "INSPECTOR" SIDE PANEL STYLES === */
+.side-panel {
+  width: 450px;
+  flex-shrink: 0;
+  background-color: var(--surface-dark-1);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  transition: margin-left 0.3s ease-in-out;
+  border-right: 1px solid var(--border-color);
+}
+.app-container.panel-closed .side-panel { margin-left: -450px; }
+
+.panel-header {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.panel-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.panel-content {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+/* === 4. CONFIGURATION CARD & DYNAMIC LIST STYLES === */
+.config-card {
+  background-color: var(--surface-dark-2);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  padding: 1.5rem;
+}
+
+.card-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+  color: var(--primary-accent);
+}
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.add-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  padding: 0;
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.item-list li {
+  background: var(--surface-dark-3);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.add-form {
+  border-top: 1px solid var(--border-color);
+  margin-top: 1rem;
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* === 5. FORM & ACTION BAR STYLES === */
+.form-group { margin-bottom: 1.25rem; }
+.form-group:last-child { margin-bottom: 0; }
+.form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary); font-size: 0.9rem; }
+
+input[type="text"], textarea {
+  width: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  background-color: var(--surface-dark-3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-family: 'Inter', sans-serif;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+input[type="text"]:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary-accent);
+  box-shadow: 0 0 0 3px rgba(126, 87, 194, 0.25);
+}
+
+.action-bar { margin-top: 1rem; }
+.enhancer-section .form-group { margin-bottom: 1rem; }
+.error-message { color: var(--error-color); background-color: rgba(207, 102, 121, 0.1); border: 1px solid var(--border-color); padding: 0.75rem; border-radius: 6px; text-align: center; margin-bottom: 1rem; }
+
+button {
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--primary-accent);
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+}
+button:hover:not(:disabled) { background-color: var(--primary-accent-darker); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { background-color: #4A4A4A; color: var(--text-secondary); cursor: not-allowed; }
+
+/* === 6. PROMPT BOX & SUB-AGENT FORM STYLES === */
+.prompt-box.editable {
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 0.9rem;
+  background-color: var(--background-dark);
+}
+
+.sub-agent-tool-form {
+  position: absolute;
+  background: var(--surface-dark-2);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  padding: 1.5rem;
+  width: 320px;
+  backdrop-filter: blur(5px);
+}
+.sub-agent-tool-form h3 { margin: 0 0 1.5rem 0; color: var(--primary-accent); }
+.sub-agent-tool-form .close-btn { position: absolute; top: 5px; right: 10px; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary); }
+.sub-agent-tool-form h4 { margin: 0 0 0.75rem 0; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; }
+.tool-list { margin-bottom: 1.5rem; }
+.tool-list ul { list-style: none; padding: 0; margin: 0; }
+.tool-list li { margin-bottom: 0.5rem; font-size: 0.9rem; }
+.tool-list li strong { color: var(--text-primary); }
+.no-tools-message { color: var(--text-secondary); font-style: italic; font-size: 0.9rem; }
+.add-tool-form button { margin-top: 0.5rem; }
+
+/* === 7. REACT FLOW DARK THEME === */
+.flow-wrapper { width: 100%; height: 100%; }
+.react-flow__node {
+  border-radius: 8px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  color: white; /* Ensure text color is white by default */
+}
+.react-flow__node.selected { box-shadow: 0 0 0 2px var(--primary-accent); }
+.react-flow__edge-path { stroke: var(--primary-accent-darker); stroke-width: 2; }
+.react-flow__edge-text { fill: var(--text-secondary); text-shadow: 0 0 5px var(--background-dark); }
+.react-flow__controls button { background-color: var(--surface-dark-2); color: var(--text-primary); border-bottom: 1px solid var(--border-color); }
+.react-flow__controls button:hover { background-color: #3A3A3A; }
+.react-flow__background { background-color: var(--background-dark); } 
+/* src/App.css */
+
+/* Modify the existing .item-list li rule */
+.item-list li {
+  background: var(--surface-dark-3);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  /* Add these properties to align items */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Add this new rule for the remove button */
+.remove-btn {
+  /* Reset general button styles */
+  width: auto;
+  height: auto;
+  padding: 2px 8px;
+  margin: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  
+  /* Styling for the '×' */
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  line-height: 1;
+  font-weight: bold;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.remove-btn:hover {
+  background-color: rgba(207, 102, 121, 0.2); /* Use transparent error color for hover */
+  color: var(--error-color); /* Make the '×' red on hover */
+}
+/* src/App.css */
+
+/* Add these new rules */
+.display-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  cursor: pointer; /* Indicates the item is clickable for editing */
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.edit-form button {
+  /* Style for the small save button */
+  width: auto;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  align-self: flex-end; /* Push button to the right */
+}
+
+/* Modify the item-list li to remove default padding */
+.item-list li {
+  background: var(--surface-dark-3);
+  padding: 0.75rem 1rem; /* Adjust padding */
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+/* src/App.css - add at the end */
+
+/* === 11. GENERIC POP-UP CARD STYLES === */
+.popup-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface-dark-2);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+  padding: 1.5rem;
+  width: 350px;
+  backdrop-filter: blur(5px);
+  z-index: 20;
+}
+
+.popup-card h3 {
+  margin-top: 0;
+  color: var(--primary-accent);
+}
+
+.popup-card .close-btn {
+  position: absolute; top: 5px; right: 10px; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary);
+}
+
+.root-agent-card .card-content p { margin: 0.5rem 0; color: var(--text-secondary); }
+.root-agent-card .card-content p strong { color: var(--text-primary); }
+.root-agent-card .instruction-btn { width: 100%; margin-top: 1.5rem; }
+
+.sub-agent-edit-form .form-group { margin: 1.5rem 0; }
+.sub-agent-edit-form button { width: 100%; }
+
+/* === 12. EXPORT BUTTON STYLES === */
+.export-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  width: auto; /* Override default 100% width */
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+/* src/App.css (add at the end) */
+
+/* === 13. MODAL STYLES === */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000; /* Make sure it's on top of everything */
+  backdrop-filter: blur(5px);
+}
+
+.modal-content {
+  background: var(--surface-dark-1);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  color: var(--primary-accent);
+}
+
+.nested-card {
+  background-color: var(--background-dark);
+  padding: 1rem;
+  margin-top: 1.5rem;
+}
+
+.add-form.inline {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 1rem;
+}
+.add-form.inline input {
+  flex-grow: 1;
+}
+.add-form.inline .add-btn {
+  flex-shrink: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 2rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 1rem;
+}
+
+.modal-actions button {
+  width: auto;
+  padding: 10px 20px;
+}
+
+.secondary-btn {
+  background-color: var(--surface-dark-3);
+  color: var(--text-secondary);
+}
+.secondary-btn:hover {
+  background-color: #444;
+}
+
+.canvas-buttons {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  display: flex;
+  gap: 0.75rem;
+}
+
+
+ .view-json-button{
+  width: auto; 
+  margin-right: 50px;
+  padding-left:  16px;
+  font-size: 0.9rem;
+  margin-left: 10px; 
+}
+.export-button{
+  margin-top: 50px;
+  margin-right: 40px;
+  padding-bottom: 10px;
+}
+
+.view-json-button {
+  color: rgb(255, 255, 255);
+  border: 1px solid var(--border-color);
+}
+
+.view-json-button:hover:not(:disabled) {
+  background-color: #3d3636;
+  color: var(--text-primary);
+}
+
+.json-viewer-modal .modal-header {
+  display: left;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+.json-viewer-modal .modal-body {
+  max-height: 70vh; 
+  overflow-y: auto;
+}
+
+.json-viewer-modal pre {
+  background-color: var(--background-dark);
+  padding: 1rem;
+  border-radius: 6px;
+  margin: 0;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap; /* Wrap long lines */
+}
+/* src/App.css - Add these styles */
+
+.modal-content.side-panel {
+  width: 90%;
+  max-width: 500px; /* Make modal width consistent with side panel */
+  height: 90%;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content .panel-header {
+  position: relative;
+}
+
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-secondary);
+  padding: 0.5rem;
+  line-height: 1;
+}

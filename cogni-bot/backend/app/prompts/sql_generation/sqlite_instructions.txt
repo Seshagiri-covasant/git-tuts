@@ -1,0 +1,23 @@
+Generate a complete, syntactically valid SQLite query following these rules:
+
+DATABASE CONTEXT:
+- Available tables: {table_list}
+- Schema details: {schema_context}
+
+SYNTAX RULES:
+- Use double quotes around table and column names: "table_name", "column_name"
+- Use = for equality checks (not ==)
+- Use proper SQLite JOIN syntax: INNER JOIN, LEFT JOIN, etc.
+- Use SQLite date functions: strftime('%Y', date_column), date(), datetime()
+- Use SQLite string functions: SUBSTR(), UPPER(), LOWER(), TRIM()
+- Use SQLite aggregation functions: COUNT(), SUM(), AVG(), MAX(), MIN()
+- Use LIMIT for result limiting, as TOP is not supported
+
+JOIN RULES:
+- Always specify the base table first: FROM table1 AS t1 INNER JOIN table2 AS t2 ON t1.key = t2.key
+- Use proper JOIN conditions immediately after ON
+- Qualify all columns with table aliases: t1.column_name
+
+OUTPUT:
+- Return a single-line JSON object like: {"sql": "SELECT ..."}
+- The sql string MUST contain only the final SQLite SQL query. No markdown, comments, or extra text.

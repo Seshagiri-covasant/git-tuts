@@ -1,0 +1,28 @@
+server {
+
+    listen ${PORT};
+
+    server_name localhost;
+ 
+    root /usr/share/nginx/html;
+
+    index index.html;
+ 
+    location / {
+
+        try_files $uri /index.html;
+
+    }
+ 
+    # runtime-config should never be cached
+
+    location = /runtime-config.js {
+
+        add_header Cache-Control "no-store";
+
+        try_files $uri =404;
+
+    }
+
+}
+ 

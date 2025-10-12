@@ -1,0 +1,29 @@
+# .dockerignore to keep the image small and builds fast
+
+# Dependencies
+node_modules
+npm-debug.log
+yarn.lock
+.pnpm-store
+
+# System files
+.DS_Store
+
+# Version control
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+
+# Docker-related
+Dockerfile
+.dockerignore
+
+# Logs & caches
+*.log
+.cache
+coverage
+dist
+build

@@ -1,0 +1,19 @@
+/.DS_Store
+/.idea
+.vscode
+**/**/__pycache__
+**/**/.DS_Store
+backend/instance/checkpoints/*
+!backend/instance/checkpoints/.gitkeep
+**/**/gcp_credentials
+**/**/temp_creds
+**/**/app.log
+.env
+**/**/.env
+**/**/node_modules
+.venv/
+# Database files
+**/**/chat_bot.db
+backend/*.csv
+frontend/dist/
+

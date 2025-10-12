@@ -1,0 +1,41 @@
+# Documentation site configuration
+site_name: CogniBot Documentation
+site_description: Comprehensive user and developer documentation for CogniBot
+site_url: /
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - User Guide: guides/user-guide.md
+  - Guides:
+      - Setup & Installation: guides/setup.md
+      - Configuration: guides/configuration.md
+      - Deployment: guides/deployment.md
+      - Semantic Schema: guides/schema.md
+      - Agents & Workflow: guides/agents.md
+      - Knowledge Cache: guides/knowledge-cache.md
+  - Tutorials:
+      - Create Your First Chatbot: tutorials/create-bot.md
+      - Run a Conversation: tutorials/run-conversation.md
+      - BA Insights: tutorials/ba-insights.md
+      - Visualization: tutorials/visualization.md
+  - Reference:
+      - API Endpoints: reference/api.md
+      - Data Models: reference/models.md
+      - Environment Variables: reference/env-vars.md
+      - Constants: reference/constants.md
+  - Advanced:
+      - Semantic Model & Knowledge Flow: advanced/semantic-deep-dive.md
+      - Benchmarking & Test Suite: advanced/benchmarking.md
+      - Scaling & Performance: advanced/scaling.md
+      - Security (Implemented): advanced/security.md
+      - Observability (Implemented): advanced/observability.md
+  - Versions: versions/README.md
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - admonition
+  - codehilite
+  - tables
+  - footnotes

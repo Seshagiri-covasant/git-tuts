@@ -1,0 +1,13 @@
+# Constants
+
+Defined in `app/constants.py`:
+
+- LLM_NAMES: [COHERE, CLAUDE, GEMINI, OPENAI, AZURE]
+- DB_TYPES: [sqlite, postgresql, bigquery]
+- LLM_MODELS: provider → default model mapping
+- DEFAULT_LLM_NAME: COHERE
+- DEFAULT_TEMPERATURE: 0.7
+- BENCHMARK_CONVERSATION_NAME: "Test Suite"
+- BENCHMARK_CONVERSATION_OWNER: "TestAdmin"
+- SCHEMA_CACHE_EXPIRATION_HOURS: 24
+- MAX_INTERACTIONS_PER_CONVERSATION: 10

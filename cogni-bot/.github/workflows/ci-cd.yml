@@ -1,0 +1,61 @@
+name: Deploy Cognibot Services
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      # 3️⃣ Install gcloud CLI
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      # 4️⃣ Authenticate Docker to Artifact Registry
+      - name: Authenticate Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      # 5️⃣ Build & Push Frontend Image
+      - name: Build & Push Frontend Image
+        run: |
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/coe-docker-repo/cognibot-frontend:latest ./frontend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/coe-docker-repo/cognibot-frontend:latest
+
+      # 6️⃣ Deploy Frontend to Cloud Run
+      - name: Deploy Frontend to Cloud Run
+        run: |
+          gcloud run deploy cognibot-frontend \
+            --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/coe-docker-repo/cognibot-frontend:latest \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated
+
+      # 7️⃣ Build & Push Backend Image
+      - name: Build & Push Backend Image
+        run: |
+          docker build --no-cache -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/coe-docker-repo/cognibot-backend:latest ./backend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/coe-docker-repo/cognibot-backend:latest
+
+      # 8️⃣ Deploy Backend to Cloud Run
+      - name: Deploy Backend to Cloud Run
+        run: |
+          gcloud run deploy cognibot-backend \
+            --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/coe-docker-repo/cognibot-backend:latest \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated

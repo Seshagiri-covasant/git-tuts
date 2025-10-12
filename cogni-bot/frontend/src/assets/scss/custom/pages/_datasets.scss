@@ -1,0 +1,200 @@
+// Datasets page styles
+
+.add-document-modal .modal-content {
+  border-radius: 1rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.add-document-modal .modal-header {
+  border-bottom: none;
+  padding: 1.5rem;
+}
+
+.add-document-modal .modal-body {
+  padding: 0 1.5rem 1.5rem;
+}
+
+.border-dashed {
+  border-style: dashed !important;
+}
+
+.upload-box {
+  border: 2px dashed #dee2e6;
+  transition: all 0.3s ease;
+}
+
+.upload-box:hover {
+  border-color: #6c757d;
+  background-color: #f8f9fa;
+}
+
+.search-icon {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #98a6ad;
+}
+
+.folder-card {
+  border: 1px solid rgba(0,0,0,.075);
+}
+
+.folder-card:hover {
+  border-color: rgba(85, 110, 230, 0.3);
+}
+
+.folder-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dropdown-toggle::after {
+  display: none;
+}
+
+.detailed-view {
+  background-color: #f8f9fa;
+}
+
+.detailed-view .card {
+  border-radius: 0.5rem;
+}
+
+.detailed-view .inbox-leftbar {
+  padding: 0.75rem;
+}
+
+.detailed-view .inbox-rightbar {
+  padding: 0.75rem;
+}
+
+.detailed-view .btn-light {
+  background-color: #fff;
+  border-color: #e9ecef;
+}
+
+.detailed-view .btn-light:hover {
+  background-color: #f8f9fa;
+  border-color: #dee2e6;
+}
+
+.detailed-view .form-control {
+  border-radius: 0.5rem;
+  border-color: #e9ecef;
+}
+
+.detailed-view .form-control:focus {
+  border-color: #556ee6;
+  box-shadow: 0 0 0 0.2rem rgba(85, 110, 230, 0.25);
+}
+
+.back-btn {
+  padding: 0.375rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.back-btn:hover {
+  background-color: #f8f9fa;
+  transform: translateX(-2px);
+}
+
+.back-btn .back-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(85, 110, 230, 0.1);
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.back-btn:hover .back-icon {
+  background-color: rgba(85, 110, 230, 0.2);
+  transform: scale(1.05);
+}
+
+.folder-info {
+  padding-left: 0.75rem;
+  border-left: 1px solid #e9ecef;
+}
+
+.create-kb-card {
+  background-color: #f8f9fa;
+}
+
+.create-kb-card:hover {
+  background-color: #f1f3fa;
+}
+
+.create-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(85, 110, 230, 0.1);
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.create-kb-card:hover .create-icon {
+  background-color: rgba(85, 110, 230, 0.2);
+  transform: scale(1.05);
+}
+
+.nav-pills .nav-link {
+  color: #6c757d;
+  padding: 0.6rem 1rem;
+  border-radius: 0.25rem;
+  transition: all 0.3s;
+}
+
+.nav-pills .nav-link:hover {
+  color: #556ee6;
+  background-color: rgba(85, 110, 230, 0.1);
+}
+
+.nav-pills .nav-link.active {
+  color: #556ee6;
+  background-color: rgba(85, 110, 230, 0.1);
+}
+
+.nav-pills .nav-link i {
+  font-size: 18px;
+  vertical-align: middle;
+}
+
+.progress-sm {
+  height: 5px;
+}
+
+.document-title {
+  color: #343a40;
+  font-weight: 600;
+  padding: 1rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.table-container {
+  padding: 1rem;
+}
+
+.table thead th {
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #e9ecef;
+  color: #6c757d;
+  font-weight: 600;
+  padding: 0.75rem;
+}
+
+.table tbody td {
+  padding: 0.75rem;
+  vertical-align: middle;
+  border-bottom: 1px solid #e9ecef;
+} 

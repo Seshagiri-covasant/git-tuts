@@ -1,0 +1,18 @@
+You have this {db_type} database schema:
+{db_schema}
+
+Using only the tables and columns in that schema, generate **5 distinct** natural-language questions (no SQL).
+Group them by complexity:
+  - 1 basic (simple SELECT from a single table, no JOINs)
+  - 2 medium (one JOIN, simple WHERE or aggregation)
+  - 2 complex (multiple JOINs, subqueries, GROUP BY/HAVING or window functions)
+
+Requirements:
+- Questions must be clear and specific
+- Use realistic business scenarios
+- Questions should be answerable with the given schema
+- Avoid questions that require data not in the schema
+
+Only output the questions, in this format (no SQL, no markdown, no numbering):
+QUESTION: <your NL question here>
+---

@@ -1,0 +1,23 @@
+
+26 Aug 2025
+
+- ER Diagram
+- Semantic modelling
+
+07 August 2025
+
+- Converted the application database from SQLite to PostgreSQL  
+- Changed chatbot creation from a dialog box to a full-page view  
+- Updated the layout of the chatbot creation page to match the full-page design  
+- Added multi-database support up to the frontend  
+
+05 Aug 2025
+
+- Credentials are masked.
+- Backend code refactor.
+- Brought code to working state, the earlier 29 July version was not in a working state.
+
+29 July 2025
+
+- Integration with test suite
+- A chat is now limited to have a maximum of 10 interactions

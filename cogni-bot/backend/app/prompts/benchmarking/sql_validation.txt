@@ -1,0 +1,28 @@
+You are a SQL expert tasked with determining if two SQL queries are functionally equivalent.
+
+Natural Language Question: {nl_question}
+
+Query 1:
+{original_sql}
+
+Query 2:
+{generated_sql}
+
+Database Type: {db_type}
+
+Instructions:
+
+1.Analyze both queries carefully.
+2.Consider the intent of the natural language question.
+3.Check if both queries would return the exact same results for any given state of the database.
+4.Account for different SQL syntax that achieves the same logical result (e.g., different JOIN syntax, equivalent WHERE clauses).
+5.Consider database-specific functions and their equivalents.
+
+Determine if these queries are functionally equivalent.
+
+Respond with ONLY one of these three words:
+"yes" - if the queries are functionally equivalent.
+"no" - if the queries are NOT functionally equivalent.
+"ambiguous" - if you cannot determine equivalence with certainty.
+
+Do not provide any explanations, just the single word answer.

@@ -1,0 +1,47 @@
+.btn{
+ 
+}
+.purple-bg {
+  background-color: #6658dd !important; /* Bootstrap's purple or customize */
+  color: white;
+}
+.btn-close{
+  color:white
+}
+
+.btn-primary{
+  background-color: #6658dd !important;
+  color: white;
+   font-size: 0.875rem;
+}
+label{
+  color:#6c757d;
+  font-size: 14px;
+}
+.formSelect{
+  display: block;
+    width: 100%;
+    padding: 0.45rem 2.7rem 0.45rem 0.9rem;
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #6c757d;
+}
+.modalHead{
+  font-size: 18px;
+  color:#343a40
+}
+
+/* Transparent scrollbar for benchmark cards grid */
+.transparent-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+.transparent-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.08);
+  border-radius: 4px;
+}
+.transparent-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.08) transparent;
+}

@@ -84,6 +84,8 @@ class QueryCleaner:
         # Replace the last message with the cleaned SQL
         state["forbidden_sql"] = False
         state["messages"][-1] = sql
+        state["generated_sql"] = sql
+        state["sql_query"] = sql
         try:
             print(f"[Query_Cleaner] Cleaned SQL: {sql[:1000]}")
         except Exception:

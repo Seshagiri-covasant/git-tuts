@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Conversation, Message, Chatbot } from '../types';
-import { Send, Bot, User, Clock } from 'lucide-react';
+import { Send, Bot, User, Brain } from 'lucide-react';
+import { DebugPanel } from './DebugPanel';
 
 interface ConversationInterfaceProps {
   selectedConversation: Conversation | null;
@@ -16,6 +17,8 @@ const ConversationInterface: React.FC<ConversationInterfaceProps> = ({
   onSendMessage
 }) => {
   const [inputMessage, setInputMessage] = useState('');
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [debugSteps, setDebugSteps] = useState<any[]>([]);
 
   const handleSendMessage = () => {
     if (inputMessage.trim() && selectedConversation) {
@@ -23,6 +26,17 @@ const ConversationInterface: React.FC<ConversationInterfaceProps> = ({
       setInputMessage('');
     }
   };
+
+  // Update debug information when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && lastMessage.debug?.steps) {
+        setDebugSteps(lastMessage.debug.steps);
+        setShowDebugPanel(true);
+      }
+    }
+  }, [messages]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -37,6 +51,13 @@ const ConversationInterface: React.FC<ConversationInterfaceProps> = ({
       minute: '2-digit',
       hour12: true
     });
+  };
+  
+  const handleDebugUpdate = (message: Message) => {
+    if (message.debug?.steps) {
+      setDebugSteps(message.debug.steps);
+      setShowDebugPanel(true);
+    }
   };
 
   if (!selectedConversation) {
@@ -63,15 +84,28 @@ const ConversationInterface: React.FC<ConversationInterfaceProps> = ({
 
   return (
     <div className="flex-1 flex flex-col">
+      {/* Debug Panel */}
+      <DebugPanel steps={debugSteps} isVisible={showDebugPanel} />
+      
+      {/* Debug Mode Toggle */}
+      <button
+        onClick={() => setShowDebugPanel(prev => !prev)}
+        className="fixed top-4 right-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg flex items-center space-x-2 z-50"
+        title={showDebugPanel ? "Hide debug information" : "Show debug information"}
+      >
+        <Brain className="w-4 h-4" />
+        <span>Debug Mode</span>
+      </button>
+
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 mt-2">
         <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-          currentConversation.title
+          {selectedConversation.title}
         </h2>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-gray-50">
+      <div className={`flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-gray-50 ${showDebugPanel ? 'mr-96' : ''}`}>
         {messages.length === 0 ? (
           <div className="text-center py-8">
             <div className="text-gray-500">

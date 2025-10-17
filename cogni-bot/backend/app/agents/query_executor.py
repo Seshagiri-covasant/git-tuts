@@ -51,14 +51,25 @@ class QueryExecutor:
 
         app_db_util = (app_db_util or self.app_db_util)
         chatbot_db_util = (chatbot_db_util or self.chatbot_db_util)
-        sql = state["messages"][-1]
-        self.logger.info(f"Raw SQL from state: {sql}")
-        if hasattr(sql, "content"):
-            sql = sql.content
-            self.logger.info(f"Extracted SQL content: {sql}")
-        elif isinstance(sql, dict) and "content" in sql:
-            sql = sql["content"]
-            self.logger.info(f"Extracted SQL from dict: {sql}")
+        
+        # Get SQL from state (from Query_Generator or Query_Validator)
+        sql = None
+        if state.get("generated_sql"):
+            sql = state.get("generated_sql")
+            self.logger.info(f"Found SQL from state.generated_sql: {sql}")
+        elif state.get("sql_query"):
+            sql = state.get("sql_query")
+            self.logger.info(f"Found SQL from state.sql_query: {sql}")
+        else:
+            # Fallback to messages
+            sql = state["messages"][-1]
+            self.logger.info(f"Raw SQL from state: {sql}")
+            if hasattr(sql, "content"):
+                sql = sql.content
+                self.logger.info(f"Extracted SQL content: {sql}")
+            elif isinstance(sql, dict) and "content" in sql:
+                sql = sql["content"]
+                self.logger.info(f"Extracted SQL from dict: {sql}")
 
         if isinstance(sql, str) and "not allowed to run data-modification" in sql:
             return {"messages": [sql]}

@@ -114,8 +114,13 @@ class SchemaExtractor:
             # If a specific schema is provided, restrict to that; otherwise use default schema
             tables = inspector.get_table_names(schema=self.schema_name) if self.schema_name else inspector.get_table_names()
             
+            print(f"[DEBUG] SchemaExtractor - selected_tables: {self.selected_tables}")
+            print(f"[DEBUG] SchemaExtractor - all tables before filtering: {tables}")
             if self.selected_tables:
                 tables = [table for table in tables if table in self.selected_tables]
+                print(f"[DEBUG] SchemaExtractor - tables after filtering: {tables}")
+            else:
+                print(f"[DEBUG] SchemaExtractor - No selected_tables, showing all tables")
 
             schema_info["total_tables"] = len(tables)
 

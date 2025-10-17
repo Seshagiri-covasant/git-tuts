@@ -32,4 +32,6 @@ google-auth-httplib2>=0.1.0
 sqlalchemy-bigquery>=1.7.0
 psutil>=5.9.0
 pandas
+openpyxl
+xlrd
 cryptography>=3.4.8

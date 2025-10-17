@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import ERDiagram from './ERDiagram';
-import { Search, RefreshCw, Plus, Check, Square, X, ChevronRight, Maximize2, Minimize2, Edit3, Trash2, Edit, Trash, Calculator } from 'lucide-react';
-import { getSemanticSchema, updateSemanticSchema } from '../services/api';
+import { Search, RefreshCw, Plus, Check, Square, X, ChevronRight, Maximize2, Minimize2, Edit3, Trash2, Edit, Trash, Calculator, Download, Upload } from 'lucide-react';
+import { getSemanticSchema, updateSemanticSchema, exportSemanticSchema, importSemanticSchema } from '../services/api';
 import { useToaster } from '../Toaster/Toaster';
 import Loader from './Loader';
 
@@ -16,6 +16,8 @@ interface SemanticColumn {
   name: string;
   display_name: string;
   description?: string;
+  business_context?: string;
+  exclude_column?: boolean;
   data_type: string;
   is_primary_key: boolean;
   is_foreign_key: boolean;
@@ -361,6 +363,13 @@ const ColumnEditor = React.memo<{
             rows={2}
             fieldKey={`${column.id}-description`}
           />
+          <TextAreaInput
+            defaultValue={column.business_context || ''}
+            onCommit={(value) => onFieldChange('business_context', value)}
+            placeholder="Business Context"
+            rows={2}
+            fieldKey={`${column.id}-business_context`}
+          />
           {/* Column synonyms editor */}
           <SynonymsTagInput
             label="Column Synonyms"
@@ -375,6 +384,19 @@ const ColumnEditor = React.memo<{
             placeholder="Column alias (e.g., cust_id for customer_id)"
             fieldKey={`${column.id}-alias`}
           />
+          {/* Exclude Column checkbox */}
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id={`${column.id}-exclude`}
+              checked={column.exclude_column || false}
+              onChange={(e) => onFieldChange('exclude_column', e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor={`${column.id}-exclude`} className="text-sm text-gray-700">
+              Exclude Column
+            </label>
+          </div>
           {/* Column type indicator (read-only) */}
           <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded">
             {column.is_primary_key ? 'Primary Key' : column.is_foreign_key ? 'Foreign Key' : 'Regular Column'}
@@ -400,7 +422,16 @@ const ColumnEditor = React.memo<{
           <p className="text-xs text-gray-500">
             {column.description || 'Click to add description'}
           </p>
-
+          {column.business_context && (
+            <p className="text-xs text-blue-600 mt-1">
+              <strong>Business Context:</strong> {column.business_context}
+            </p>
+          )}
+          {column.exclude_column && (
+            <p className="text-xs text-red-600 mt-1">
+              <strong>Excluded from queries</strong>
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -832,6 +863,10 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   // Relationship filtering state (used by relationship inspector)
   const [relationshipFilter, setRelationshipFilter] = useState<{ a: string; b: string } | null>(null);
 
+  // Export/Import state
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
   // Relationship state
   const [newRelationship, setNewRelationship] = useState({
     name: '',
@@ -921,6 +956,8 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
             name: colName,
             display_name: c?.display_name || colName,
             description: c?.description || '',
+              business_context: c?.business_context || '',  // ✅ Added
+              exclude_column: Boolean(c?.exclude_column),   // ✅ Added
             data_type: c?.data_type || c?.type || 'string',
             is_primary_key: Boolean(c?.is_primary_key || c?.pk),
             is_foreign_key: Boolean(c?.is_foreign_key || c?.fk),
@@ -929,6 +966,7 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
             created_at: c?.created_at || nowIso,
             updated_at: c?.updated_at || nowIso,
           };
+            
         });
         // Handle table metrics - convert from dict to metric_items format
         const tableMetrics = t?.metrics || {};
@@ -1105,6 +1143,8 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
               name: colName,
               display_name: c?.display_name || colName,
               description: c?.description || '',
+              business_context: c?.business_context || '',
+              exclude_column: Boolean(c?.exclude_column),
               data_type: c?.data_type || c?.type || 'string',
               is_primary_key: Boolean(c?.is_primary_key || c?.pk),
               is_foreign_key: Boolean(c?.is_foreign_key || c?.fk),
@@ -1451,12 +1491,18 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
 
   // Save functions
   const handleSaveSchema = async () => {
+    console.log('🔍 Save button clicked!');
+    console.log('Schema:', schema);
+    console.log('Saving state:', saving);
+    
     if (!schema) {
+      console.log('❌ No schema to save');
       showToast('No schema to save', 'error');
       return;
     }
     
     try {
+      console.log('🔄 Starting save process...');
       setSaving(true);
       
       // Validate schema before saving
@@ -1640,6 +1686,8 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
       const dbMetricItems = (sanitizedSchema.metadata && (sanitizedSchema.metadata as any).database_metric_items) || [];
       console.log('DEBUG: Database metric items from UI:', dbMetricItems);
       console.log('DEBUG: Database metric expressions:', dbMetricItems.map((m: any) => ({ name: m.name, value: m.value })));
+      console.log('DEBUG: Full metadata:', sanitizedSchema.metadata);
+      console.log('DEBUG: Schema metrics array:', sanitizedSchema.metrics);
       
       const dbMetrics = Array.isArray(dbMetricItems) && dbMetricItems.length > 0
         ? dbMetricItems.map((m: any) => {
@@ -1813,6 +1861,48 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const handleRefreshSchema = async () => {
     await loadSemanticSchema();
     showToast('Schema refreshed successfully', 'success');
+  };
+
+  // Export schema to Excel
+  const handleExportSchema = async () => {
+    if (!schema) {
+      showToast('No schema to export', 'error');
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      await exportSemanticSchema(chatbotId);
+      showToast('Schema exported successfully', 'success');
+    } catch (error) {
+      console.error('Export error:', error);
+      showToast('Failed to export schema', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Import schema from Excel
+  const handleImportSchema = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      
+      const response = await importSemanticSchema(chatbotId, file);
+      showToast(`Schema imported successfully. Updated ${response.data.updated_columns} columns.`, 'success');
+      
+      // Refresh the schema to show updated data
+      await loadSemanticSchema();
+    } catch (error) {
+      console.error('Import error:', error);
+      showToast(`Failed to import schema: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    } finally {
+      setIsImporting(false);
+      // Reset file input
+      event.target.value = '';
+    }
   };
 
   // Table selection
@@ -2208,6 +2298,34 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
           </div>
           <div className="flex items-center space-x-3">
             <button
+              onClick={handleExportSchema}
+              disabled={isExporting}
+              className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px] disabled:opacity-50"
+            >
+              {isExporting ? (
+                <Loader />
+              ) : (
+                <Download className="w-4 h-4 mr-2 text-blue-600" />
+              )}
+              <span className="text-blue-600 font-medium">
+                {isExporting ? 'Exporting...' : 'Export Schema'}
+              </span>
+            </button>
+            <button
+              onClick={() => document.getElementById('import-schema-input')?.click()}
+              disabled={isImporting}
+              className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px] disabled:opacity-50"
+            >
+              {isImporting ? (
+                <Loader />
+              ) : (
+                <Upload className="w-4 h-4 mr-2 text-green-600" />
+              )}
+              <span className="text-green-600 font-medium">
+                {isImporting ? 'Importing...' : 'Import Schema'}
+              </span>
+            </button>
+            <button
               onClick={handleRefreshSchema}
               className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px]"
               disabled={loading}
@@ -2223,7 +2341,11 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
               <span className="text-green-600 font-medium">Metrics</span>
             </button>
             <button
-              onClick={handleSaveSchema}
+              onClick={() => {
+                console.log('🔍 Save Changes button clicked!');
+                console.log('Button disabled?', saving);
+                handleSaveSchema();
+              }}
               disabled={saving}
               className="flex items-center justify-center px-6 py-2.5 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 min-w-[140px]"
             >
@@ -2895,12 +3017,19 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
                   }, [schema?.metadata]);
 
                   const commitDbMetrics = (updated: DatabaseMetricItem[]) => {
+                    console.log('🔍 COMMIT DB METRICS: Updating metrics:', updated);
                     setLocalDbMetrics(updated);
-                    setSchema(prev => prev ? {
-                      ...prev,
-                      metadata: { ...(prev.metadata || {}), database_metric_items: updated },
-                      metrics: updated.map(m => m.name)
-                    } : prev);
+                    setSchema(prev => {
+                      if (!prev) return prev;
+                      const newSchema = {
+                        ...prev,
+                        metadata: { ...(prev.metadata || {}), database_metric_items: updated },
+                        metrics: updated.map(m => m.name)
+                      };
+                      console.log('🔍 COMMIT DB METRICS: New schema metadata:', newSchema.metadata);
+                      console.log('🔍 COMMIT DB METRICS: New schema metrics:', newSchema.metrics);
+                      return newSchema;
+                    });
                   };
 
                   const addDbMetric = () => {
@@ -3333,8 +3462,21 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
           </div>
         </div>
       )}
+      
+      {/* Hidden file input for import */}
+      <input
+        id="import-schema-input"
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        onChange={handleImportSchema}
+        style={{ display: 'none' }}
+      />
     </div>
   );
+
+  // Global function for manual testing
+  (window as any).manualSaveSchema = handleSaveSchema;
+  (window as any).getSchemaState = () => ({ schema, saving, isEditMode });
 
   // Main return
   return isExpanded ? <ExpandedView /> : <CompactView />;

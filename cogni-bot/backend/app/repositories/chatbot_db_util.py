@@ -179,6 +179,7 @@ class ChatbotDbUtil:
             Column("db_type", String(50), nullable=True),
             Column("db_url", String(500), nullable=True),
             Column("schema_name", String(100), nullable=True),
+            Column("selected_tables", Text, nullable=True),  # JSON array of selected table names
             Column("current_llm_name", String(100), default="COHERE"),
             Column("temperature", Float, default=0.7,
                    nullable=False),  # LLM temperature setting
@@ -346,6 +347,7 @@ class ChatbotDbUtil:
                     proj.c.db_type,
                     proj.c.db_url,
                     proj.c.schema_name,
+                    proj.c.selected_tables,  # Include selected_tables field
                     proj.c.current_llm_name,
                     proj.c.temperature,
                     proj.c.created_at,
@@ -402,12 +404,12 @@ class ChatbotDbUtil:
         except Exception as e:
             raise Exception(f"Error fetching all chatbots: {e}")
 
-    def update_chatbot(self, chatbot_id, db_type=None, db_url=None, schema_name=None, current_llm_name=None, status=None, template_id=None, efficiency=None, temperature=None, industry=None, vertical=None, domain=None, knowledge_base_file=None, credentials_json=None, llm_key_settings=None):
+    def update_chatbot(self, chatbot_id, db_type=None, db_url=None, schema_name=None, selected_tables=None, current_llm_name=None, status=None, template_id=None, efficiency=None, temperature=None, industry=None, vertical=None, domain=None, knowledge_base_file=None, credentials_json=None, llm_key_settings=None):
         """
         Updates a chatbot's database connection info, LLM settings, status, default template, efficiency, temperature, and knowledge base settings.
         """
         try:
-            print(f"DEBUG: update_chatbot called for {chatbot_id} with db_type={db_type}, db_url={db_url}, schema_name={schema_name}, status={status}, template_id={template_id}, efficiency={efficiency}, temperature={temperature}, industry={industry}, vertical={vertical}, domain={domain}")
+            print(f"DEBUG: update_chatbot called for {chatbot_id} with db_type={db_type}, db_url={db_url}, schema_name={schema_name}, selected_tables={selected_tables}, status={status}, template_id={template_id}, efficiency={efficiency}, temperature={temperature}, industry={industry}, vertical={vertical}, domain={domain}")
             with self.db_engine.begin() as connection:
                 update_values = {}
                 if db_type is not None:
@@ -416,6 +418,8 @@ class ChatbotDbUtil:
                     update_values["db_url"] = db_url
                 if schema_name is not None:
                     update_values["schema_name"] = schema_name
+                if selected_tables is not None:
+                    update_values["selected_tables"] = selected_tables
                 if current_llm_name is not None:
                     update_values["current_llm_name"] = current_llm_name
                 if status is not None:
@@ -1737,6 +1741,39 @@ class ChatbotDbUtil:
             True if successful, False otherwise
         """
         try:
+            # 🔍 LOGGING: Track schema updates in database
+            print(f"\n{'='*80}")
+            print(f"💾 DATABASE: Storing semantic schema")
+            print(f"{'='*80}")
+            print(f"🤖 Chatbot ID: {chatbot_id}")
+            print(f"📊 Schema JSON Length: {len(semantic_schema_json)} characters")
+            
+            # Parse and log key schema information
+            try:
+                schema_data = json.loads(semantic_schema_json)
+                print(f"📋 Tables: {len(schema_data.get('tables', {}))}")
+                print(f"📈 Metrics: {len(schema_data.get('metrics', []))}")
+                
+                # Log business metrics being stored
+                for metric in schema_data.get('metrics', []):
+                    print(f"  📊 {metric.get('name', 'Unknown')}: {metric.get('expression', 'No expression')}")
+                
+                # Log tables with business context
+                for table_name, table_data in schema_data.get('tables', {}).items():
+                    if table_data.get('business_context'):
+                        print(f"  📋 {table_name}: {table_data.get('business_context')}")
+                
+                # Log columns with business context
+                for table_name, table_data in schema_data.get('tables', {}).items():
+                    for col_name, col_data in table_data.get('columns', {}).items():
+                        if col_data.get('business_context'):
+                            print(f"  📝 {table_name}.{col_name}: {col_data.get('business_context')}")
+                            
+            except json.JSONDecodeError as e:
+                print(f"⚠️  Warning: Could not parse schema JSON for logging: {e}")
+            
+            print(f"{'='*80}\n")
+            
             with self.db_engine.begin() as connection:
                 query = (
                     self.chatbots_table.update()
@@ -1744,10 +1781,10 @@ class ChatbotDbUtil:
                     .values(semantic_schema_json=semantic_schema_json)
                 )
                 result = connection.execute(query)
+                print(f"✅ Schema successfully stored in database (rows affected: {result.rowcount})")
                 return result.rowcount > 0
         except Exception as e:
-            print(
-                f"Error storing semantic schema for chatbot {chatbot_id}: {e}")
+            print(f"❌ Error storing semantic schema for chatbot {chatbot_id}: {e}")
             return False
 
     def get_semantic_schema(self, chatbot_id: str) -> str:

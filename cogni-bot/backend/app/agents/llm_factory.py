@@ -83,6 +83,54 @@ def get_api_key_for_llm(llm_name: str, chatbot_id: Optional[str] = None) -> str:
         return ''
 
 
+class LLMFactory:
+    """
+    Factory class for creating LLM instances with different configurations.
+    """
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def create_llm(self, provider: str = "openai", model: str = "gpt-3.5-turbo", 
+                   temperature: float = 0.7, api_key: Optional[str] = None, 
+                   chatbot_id: Optional[str] = None) -> BaseLanguageModel:
+        """
+        Create an LLM instance based on the provider and configuration.
+        
+        Args:
+            provider: LLM provider (openai, azure, cohere, gemini, claude)
+            model: Model name to use
+            temperature: Temperature setting for the LLM
+            api_key: Optional API key (if not provided, will use get_api_key_for_llm)
+            chatbot_id: Optional chatbot ID for local API key lookup
+            
+        Returns:
+            Configured language model instance
+        """
+        try:
+            # Map provider names to our internal LLM names
+            provider_mapping = {
+                "openai": "OPENAI",
+                "azure": "AZURE", 
+                "cohere": "COHERE",
+                "gemini": "GEMINI",
+                "claude": "CLAUDE"
+            }
+            
+            llm_name = provider_mapping.get(provider.lower(), "OPENAI")
+            
+            # Use the existing get_llm function with the mapped name
+            return get_llm(
+                llm_name=llm_name,
+                temperature=temperature,
+                chatbot_id=chatbot_id
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error creating LLM with provider {provider}: {str(e)}")
+            raise
+
+
 def get_llm(llm_name: Optional[str] = None, temperature: float = 0.7, app_db_util=None, chatbot_db_util=None, chatbot_id: Optional[str] = None) -> BaseLanguageModel:
     """
     Dynamically fetch the LLM based on the provided model name or default configuration.

@@ -347,28 +347,37 @@ Output: Return ONLY the minimally corrected SQL text, no commentary or markdown 
             app_db_util = app_db_util or self.app_db_util
             chatbot_db_util = chatbot_db_util or self.chatbot_db_util
 
-            # Get the SQL query from the previous node (Query_Cleaner)
+            # Get the SQL query from the previous node (Query_Generator or Query_Cleaner)
             sql_query = None
             
-            # Look for the most recent message that contains SQL (from Query_Cleaner)
-            for msg in reversed(state.get("messages", [])):
-                content_str = None
-                if isinstance(msg, dict):
-                    c = msg.get("content")
-                    if isinstance(c, str):
-                        content_str = c
-                elif hasattr(msg, "content") and isinstance(getattr(msg, "content"), str):
-                    content_str = getattr(msg, "content")
-                
-                if content_str:
-                    # Skip system messages we added
-                    if content_str.startswith("INTENT:") or content_str.startswith("CLIPPED:"):
-                        continue
+            # First, try to get SQL from state directly (from Query_Generator)
+            if state.get("generated_sql"):
+                sql_query = state.get("generated_sql")
+                print(f"[Query_Validator] Found SQL from state.generated_sql: {sql_query[:100]}...")
+            elif state.get("sql_query"):
+                sql_query = state.get("sql_query")
+                print(f"[Query_Validator] Found SQL from state.sql_query: {sql_query[:100]}...")
+            else:
+                # Fallback: Look for the most recent message that contains SQL
+                for msg in reversed(state.get("messages", [])):
+                    content_str = None
+                    if isinstance(msg, dict):
+                        c = msg.get("content")
+                        if isinstance(c, str):
+                            content_str = c
+                    elif hasattr(msg, "content") and isinstance(getattr(msg, "content"), str):
+                        content_str = getattr(msg, "content")
                     
-                    # Look for SQL-like content (contains SELECT, FROM, etc.)
-                    if any(keyword in content_str.upper() for keyword in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH']):
-                        sql_query = content_str
-                        break
+                    if content_str:
+                        # Skip system messages we added
+                        if content_str.startswith("INTENT:") or content_str.startswith("CLIPPED:"):
+                            continue
+                        
+                        # Look for SQL-like content (contains SELECT, FROM, etc.)
+                        if any(keyword in content_str.upper() for keyword in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH']):
+                            sql_query = content_str
+                            print(f"[Query_Validator] Found SQL from messages: {sql_query[:100]}...")
+                            break
 
             if not sql_query:
                 print("[Query_Validator] No SQL query found to validate")

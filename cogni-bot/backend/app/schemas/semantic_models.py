@@ -112,6 +112,8 @@ class SemanticColumn(BaseModel):
     name: str = Field(default="", description="Column name (legacy field)")
     display_name: str = Field(default="", description="Display name (derived from name)")
     description: Optional[str] = None
+    business_context: Optional[str] = Field(default=None, description="Business context for the column")
+    exclude_column: bool = Field(default=False, description="Whether to exclude this column from queries")
     data_type: str = Field(default="", description="Legacy field - use type instead")
     is_primary_key: bool = Field(default=False, description="Legacy field - use pk instead")
     is_foreign_key: bool = Field(default=False, description="Legacy field - use fk instead")
@@ -182,6 +184,12 @@ class SemanticColumn(BaseModel):
         
         if self.description:
             result["description"] = self.description
+        
+        if self.business_context:
+            result["business_context"] = self.business_context
+        
+        if self.exclude_column:
+            result["exclude_column"] = self.exclude_column
         
         if self.fk:
             # Preserve the detailed FK reference alongside boolean fk flag
@@ -533,7 +541,7 @@ class DatabaseSchema(BaseModel):
                 },
                 "tables": {},
                 "relationships": [],
-                "metrics": [],
+                "metrics": [metric.to_json_dict() for metric in self.metrics] if self.metrics else [],
                 "date_aliases": {},
                 "metadata": self.metadata or {},
                 "last_sync": self.last_sync.isoformat() if self.last_sync else None,
@@ -806,3 +814,783 @@ The models are designed to match the JSON structure in json.txt:
 - BusinessMetric matches the metrics array structure
 - All supporting models (ForeignKeyReference, DateAlias, etc.) match their respective JSON structures
 """
+
+
+
+class BusinessMetric(BaseModel):
+
+    """Represents calculated business metrics.
+
+    
+
+    This model matches the new clean metrics structure:
+
+    - name: Display name of the metric
+
+    - expression: SQL expression for calculating the metric
+
+    - default_filters: List of default filters to apply (optional)
+
+    """
+
+    name: str = Field(..., description="Display name of the metric")
+
+    expression: str = Field(..., description="SQL expression for calculating the metric")
+
+    default_filters: List[str] = Field(default_factory=list, description="List of default filters to apply")
+
+    
+
+    # Additional semantic fields for comprehensive context
+
+    description: Optional[str] = Field(default=None, description="Description of what this metric measures")
+
+    aggregation_type: Optional[str] = Field(default=None, description="Type of aggregation (e.g., sum, count, average)")
+
+    business_context: Optional[str] = Field(default=None, description="Business context and usage of this metric")
+
+    
+
+    # Legacy fields for backward compatibility
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Legacy field - auto-generated")
+
+    display_name: str = Field(default="", description="Legacy field - use name instead")
+
+    description: Optional[str] = None
+
+    base_table: str = Field(default="", description="Legacy field - derived from context")
+
+    sql_expression: str = Field(default="", description="Legacy field - use expression instead")
+
+    aggregation_type: Optional[AggregationType] = None
+
+    depends_on_tables: List[str] = Field(default_factory=list, description="Tables this metric depends on")
+
+    depends_on_columns: List[str] = Field(default_factory=list, description="Columns this metric depends on")
+
+    business_context: Optional[str] = None
+
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    
+
+    def __init__(self, **data):
+
+        super().__init__(**data)
+
+        # Auto-populate legacy fields for backward compatibility
+
+        if not self.display_name:
+
+            self.display_name = self.name
+
+        if not self.sql_expression:
+
+            self.sql_expression = self.expression
+
+    
+
+    def to_json_dict(self) -> Dict[str, Any]:
+
+        """Convert the metric to a dictionary matching the new clean JSON schema format."""
+
+        result = {
+
+            "name": self.name,
+
+            "expression": self.expression,
+
+            "default_filters": self.default_filters,
+
+            "description": self.description,
+
+            "aggregation_type": self.aggregation_type.value if self.aggregation_type else None,
+
+            "business_context": self.business_context
+
+        }
+
+        
+
+        # Only include non-None values
+
+        return {k: v for k, v in result.items() if v is not None}
+
+
+
+class DatabaseSchema(BaseModel):
+
+    """Represents a complete database schema with semantic information.
+
+    
+
+    This model matches the new clean JSON schema structure:
+
+    - id: Unique identifier for the schema
+
+    - display_name: User-friendly name for the database
+
+    - dialect: SQL dialect (e.g., "postgres", "mysql", "sqlite")
+
+    - schema_prefix: Database schema prefix (e.g., "ecommerce")
+
+    - connection_config: Database connection configuration
+
+    - global_aliases: Table aliases for SQL queries
+
+    - global_synonyms: Global synonyms dictionary
+
+    - tables: Dictionary of table names to SemanticTable objects
+
+    - relationships: List of relationships between tables
+
+    - date_aliases: Date alias configurations
+
+    - metadata: Additional metadata including original schema info
+
+    - last_sync: Last synchronization timestamp
+
+    - created_at: Creation timestamp
+
+    - updated_at: Last update timestamp
+
+    """
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the schema")
+
+    display_name: str = Field(..., description="User-friendly name for the database")
+
+    dialect: str = Field(default="postgres", description="SQL dialect (e.g., 'postgres', 'mysql', 'sqlite')")
+
+    schema_prefix: Optional[str] = Field(default=None, description="Database schema prefix (e.g., 'ecommerce')")
+
+    connection_config: ConnectionConfig = Field(..., description="Database connection configuration")
+
+
+
+    aliases: TableAliases = Field(default_factory=TableAliases, description="Table and column aliases for LLM context")
+
+    tables: Dict[str, SemanticTable] = Field(default_factory=dict, description="Dictionary of table names to table definitions")
+
+    relationships: List[SemanticRelationship] = Field(default_factory=list, description="List of relationships between tables")
+
+    date_aliases: Dict[str, DateAlias] = Field(default_factory=dict, description="Date alias configurations")
+
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata including original schema info")
+
+    last_sync: Optional[datetime] = Field(default=None, description="Last synchronization timestamp")
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp")
+
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last update timestamp")
+
+    
+
+    # Legacy fields for backward compatibility
+
+    name: str = Field(default="", description="Legacy field - use display_name instead")
+
+    database_id: str = Field(default="", description="Legacy field - use id instead")
+
+
+
+    synonyms: Dict[str, List[str]] = Field(default_factory=dict, description="Legacy field - use global_synonyms instead")
+
+    metrics: List[BusinessMetric] = Field(default_factory=list, description="Legacy field - metrics are now in tables")
+
+    
+
+    def __init__(self, **data):
+
+        super().__init__(**data)
+
+        # Auto-populate legacy fields for backward compatibility
+
+        if not self.name:
+
+            self.name = self.display_name
+
+        if not self.database_id:
+
+            self.database_id = self.id
+
+
+
+    
+
+    def to_json_dict(self) -> Dict[str, Any]:
+
+        """Convert the database schema to a dictionary matching the new clean JSON schema format."""
+
+        try:
+
+            result = {
+
+                "id": self.id,
+
+                "display_name": self.display_name,
+
+                "dialect": self.dialect,
+
+                "connection_config": {
+
+                    "db_url": self.connection_config.db_url,
+
+                    "db_type": self.connection_config.db_type
+
+                },
+
+                "tables": {},
+
+                "relationships": [],
+
+                "metrics": [],
+
+                "date_aliases": {},
+
+                "metadata": self.metadata or {},
+
+                "last_sync": self.last_sync.isoformat() if self.last_sync else None,
+
+                "created_at": self.created_at.isoformat() if self.created_at else None,
+
+                "updated_at": self.updated_at.isoformat() if self.updated_at else None
+
+            }
+
+            
+
+            # Safely convert tables
+
+            for name, table in self.tables.items():
+
+                try:
+
+                    result["tables"][name] = table.to_json_dict()
+
+                except Exception as e:
+
+                    print(f"Error converting table {name}: {e}")
+
+                    result["tables"][name] = {"error": f"Failed to convert table: {str(e)}"}
+
+            
+
+            # Safely convert relationships
+
+            for rel in self.relationships:
+
+                try:
+
+                    result["relationships"].append(rel.to_json_dict())
+
+                except Exception as e:
+
+                    print(f"Error converting relationship: {e}")
+
+                    result["relationships"].append({"error": f"Failed to convert relationship: {str(e)}"})
+
+
+
+            # Safely convert database-level metrics
+
+            try:
+
+                for m in (self.metrics or []):
+
+                    try:
+
+                        result["metrics"].append(m.to_json_dict())
+
+                    except Exception as me:
+
+                        print(f"Error converting metric: {me}")
+
+                        result["metrics"].append({"error": f"Failed to convert metric: {str(me)}"})
+
+            except Exception as e:
+
+                print(f"Metrics conversion error: {e}")
+
+            
+
+            # Safely convert date aliases
+
+            for k, v in self.date_aliases.items():
+
+                try:
+
+                    result["date_aliases"][k] = v.model_dump() if hasattr(v, 'model_dump') else v.dict()
+
+                except Exception as e:
+
+                    print(f"Error converting date alias {k}: {e}")
+
+                    result["date_aliases"][k] = {"error": f"Failed to convert date alias: {str(e)}"}
+
+            
+
+            if self.schema_prefix:
+
+                result["schema_prefix"] = self.schema_prefix
+
+                
+
+            # Include aliases for backward compatibility and frontend support
+
+            if self.aliases:
+
+                try:
+
+                    result["aliases"] = self.aliases.to_json_dict()
+
+                except Exception as e:
+
+                    print(f"Error converting aliases: {e}")
+
+                    result["aliases"] = {"error": f"Failed to convert aliases: {str(e)}"}
+
+
+
+            return result
+
+            
+
+        except Exception as e:
+
+            print(f"Critical error in to_json_dict: {e}")
+
+            # Return a minimal valid structure
+
+            return {
+
+                "id": self.id or "unknown",
+
+                "display_name": self.display_name or "Unknown Schema",
+
+                "dialect": self.dialect or "postgres",
+
+                "connection_config": {
+
+                    "db_url": getattr(self.connection_config, 'db_url', ''),
+
+                    "db_type": getattr(self.connection_config, 'db_type', 'postgresql')
+
+                },
+
+                "tables": {},
+
+                "relationships": [],
+
+                "date_aliases": {},
+
+                "metadata": {},
+
+                "error": f"Schema conversion failed: {str(e)}"
+
+            }
+
+    
+
+    @classmethod
+
+    def from_json_dict(cls, data: Dict[str, Any]) -> 'DatabaseSchema':
+
+        """Create a DatabaseSchema instance from a JSON dictionary."""
+
+        # Convert date_aliases back to DateAlias objects
+
+        if 'date_aliases' in data:
+
+            date_aliases = {}
+
+            for k, v in data['date_aliases'].items():
+
+                date_aliases[k] = DateAlias(**v)
+
+            data['date_aliases'] = date_aliases
+
+        
+
+        # Convert connection_config back to ConnectionConfig object
+
+        if 'connection_config' in data:
+
+            data['connection_config'] = ConnectionConfig(**data['connection_config'])
+
+        
+
+        # Convert tables back to SemanticTable objects
+
+        if 'tables' in data:
+
+            tables = {}
+
+            for table_name, table_data in data['tables'].items():
+
+                # Convert columns back to SemanticColumn objects
+
+                if 'columns' in table_data:
+
+                    columns = {}
+
+                    for col_name, col_data in table_data['columns'].items():
+
+                        # Convert fk back to ForeignKeyReference object
+
+                        if 'fk' in col_data:
+
+                            col_data['fk'] = ForeignKeyReference(**col_data['fk'])
+
+                        # Add the column name to the column data
+
+                        col_data['name'] = col_name
+
+                        columns[col_name] = SemanticColumn(**col_data)
+
+                    table_data['columns'] = columns
+
+                
+
+                # Convert metrics back to BusinessMetric objects
+
+                if 'metrics' in table_data:
+
+                    metrics = {}
+
+                    for metric_name, metric_data in table_data['metrics'].items():
+
+                        metrics[metric_name] = BusinessMetric(**metric_data)
+
+                    table_data['metrics'] = metrics
+
+                
+
+                # Add the table name to the table data
+
+                table_data['name'] = table_name
+
+                tables[table_name] = SemanticTable(**table_data)
+
+            data['tables'] = tables
+
+        
+
+        # Convert relationships back to SemanticRelationship objects
+
+        if 'relationships' in data:
+
+            relationships = []
+
+            for rel_data in data['relationships']:
+
+                # Convert 'from' to 'from_field' for the model
+
+                if 'from' in rel_data:
+
+                    rel_data['from_field'] = rel_data.pop('from')
+
+                relationships.append(SemanticRelationship(**rel_data))
+
+            data['relationships'] = relationships
+
+        
+
+        # Convert datetime strings back to datetime objects
+
+        if 'last_sync' in data and data['last_sync']:
+
+            data['last_sync'] = datetime.fromisoformat(data['last_sync'].replace('Z', '+00:00'))
+
+        if 'created_at' in data:
+
+            data['created_at'] = datetime.fromisoformat(data['created_at'].replace('Z', '+00:00'))
+
+        if 'updated_at' in data:
+
+            data['updated_at'] = datetime.fromisoformat(data['updated_at'].replace('Z', '+00:00'))
+
+        
+
+        return cls(**data)
+
+
+
+class EntityMapping(BaseModel):
+
+    """Maps equivalent entities across different databases."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    canonical_name: str
+
+    display_name: str
+
+    description: Optional[str] = None
+
+    mapped_tables: List[Dict[str, str]]
+
+    mapped_columns: Dict[str, List[Dict[str, str]]]
+
+    transformation_rules: Dict[str, str] = Field(default_factory=dict)
+
+    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+
+class FederatedSemanticModel(BaseModel):
+
+    """Represents a federated view across multiple databases."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    name: str
+
+    description: Optional[str] = None
+
+    database_schemas: List[str]
+
+    entity_mappings: List[EntityMapping]
+
+    cross_database_relationships: List[SemanticRelationship]
+
+    global_metrics: List[BusinessMetric]
+
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+
+
+
+# =============================================================================
+
+# USAGE EXAMPLES AND DOCUMENTATION
+
+# =============================================================================
+
+
+
+"""
+
+This module provides Pydantic models that match the JSON schema structure
+
+defined in the cogni-bot project. The models are designed to:
+
+
+
+1. Generate JSON in the exact format specified in json.txt
+
+2. Maintain backward compatibility with existing code
+
+3. Support frontend integration and updates
+
+4. Provide proper serialization/deserialization methods
+
+
+
+USAGE EXAMPLES:
+
+
+
+1. Creating a DatabaseSchema from JSON:
+
+   ```python
+
+   import json
+
+   from app.schemas.semantic_models import DatabaseSchema
+
+   
+
+   # Load JSON data
+
+   with open('schema.json', 'r') as f:
+
+       json_data = json.load(f)
+
+   
+
+   # Create DatabaseSchema instance
+
+   schema = DatabaseSchema.from_json_dict(json_data)
+
+   ```
+
+
+
+2. Converting DatabaseSchema to JSON:
+
+   ```python
+
+   # Create schema instance
+
+   schema = DatabaseSchema(
+
+       display_name="E-commerce Database",
+
+       dialect="postgres",
+
+       connection_config=ConnectionConfig(
+
+           db_url="postgresql://user:pass@localhost/db",
+
+           db_type="postgresql"
+
+       )
+
+   )
+
+   
+
+   # Convert to JSON-compatible dictionary
+
+   json_dict = schema.to_json_dict()
+
+   
+
+   # Save to file
+
+   with open('output.json', 'w') as f:
+
+       json.dump(json_dict, f, indent=2)
+
+   ```
+
+
+
+3. Creating individual components:
+
+   ```python
+
+   # Create a column with foreign key
+
+   column = SemanticColumn(
+
+       name="customer_id",
+
+       data_type="integer",
+
+       pk=False,
+
+       fk=ForeignKeyReference(table="customers", column="customer_id"),
+
+       synonyms=["client_id", "buyer_id"]
+
+   )
+
+   
+
+   # Create a table
+
+   table = SemanticTable(
+
+       name="purchases",
+
+       schema="ecommerce",
+
+       synonyms=["orders", "transactions"],
+
+       columns=[column]
+
+   )
+
+   
+
+   # Create a relationship
+
+   relationship = SemanticRelationship(
+
+       left_table="purchases",
+
+       left_column="customer_id",
+
+       right_table="customers",
+
+       right_column="customer_id"
+
+   )
+
+   
+
+   # Create a metric
+
+   metric = BusinessMetric(
+
+       id="total_revenue",
+
+       name="Total Revenue",
+
+       base_table="purchases",
+
+       expression="SUM(p.quantity * p.unit_price)",
+
+       default_filters=["p.status = 'completed'"],
+
+       synonyms=["total sales", "turnover"]
+
+   )
+
+   ```
+
+
+
+BACKWARD COMPATIBILITY:
+
+
+
+All models maintain backward compatibility by:
+
+- Keeping legacy field names as optional fields
+
+- Auto-populating legacy fields from new fields in __init__
+
+- Providing both old and new field access patterns
+
+
+
+FRONTEND INTEGRATION:
+
+
+
+The models support frontend integration through:
+
+- to_json_dict() methods that output the exact JSON format
+
+- from_json_dict() class methods for parsing frontend data
+
+- Proper handling of datetime serialization
+
+- Support for all JSON schema fields
+
+
+
+JSON SCHEMA COMPATIBILITY:
+
+
+
+The models are designed to match the JSON structure in json.txt:
+
+- DatabaseSchema matches the root JSON structure
+
+- SemanticTable matches the tables array structure
+
+- SemanticColumn matches the columns array structure
+
+- SemanticRelationship matches the relationships array structure
+
+- BusinessMetric matches the metrics array structure
+
+- All supporting models (ForeignKeyReference, DateAlias, etc.) match their respective JSON structures
+
+"""
+
+

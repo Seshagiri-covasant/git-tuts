@@ -1,14 +1,18 @@
 import json
-from typing import Optional
+from typing import Optional, Dict, List, Any
 from langchain_core.messages import SystemMessage
 from langchain_core.language_models import BaseLanguageModel
 from app.repositories.chatbot_db_util import ChatbotDbUtil
+# from .conversation_aware_domain_checker import ConversationAwareDomainChecker  # Deleted agent
 
 
 class DomainRelevanceCheckerAgent:
     def __init__(self, llm: BaseLanguageModel, chatbot_db_util: Optional[ChatbotDbUtil] = None):
         self.llm = llm
         self.chatbot_db_util = chatbot_db_util
+        
+        # Initialize conversation-aware domain checker
+        self.conversation_aware_checker = ConversationAwareDomainChecker(llm, chatbot_db_util)
 
     def _extract_domain_from_schema(self, semantic_schema: dict, chatbot_db_util, chatbot_id: str) -> str:
         """Return explicit chatbot domain if configured; otherwise use LLM to infer domain."""
@@ -152,8 +156,8 @@ Answer only: YES or NO"""
             return True  # Default to relevant if LLM fails
 
     def run(self, state: dict, chatbot_id: str, chatbot_db_util) -> dict:
-        """Check if the question is relevant to the configured database domain using LLM intelligence."""
-        print(f"[Domain_Relevance_Checker] Starting LLM-based domain relevance check for chatbot {chatbot_id}")
+        """Check if the question is relevant to the configured database domain using conversation-aware LLM intelligence."""
+        print(f"[Domain_Relevance_Checker] Starting conversation-aware domain relevance check for chatbot {chatbot_id}")
         
         # Get the user's question
         question = ""
@@ -191,42 +195,79 @@ Answer only: YES or NO"""
             
             semantic_schema = json.loads(semantic_schema_json)
             
-            # Use LLM to determine domain
-            domain = self._extract_domain_from_schema(semantic_schema, chatbot_db_util, chatbot_id)
-            print(f"[Domain_Relevance_Checker] Detected domain: {domain}")
+            # Extract conversation history for context awareness
+            conversation_history = self._extract_conversation_history(state)
             
-            # If domain is 'general', don't block any question
-            if domain == 'general':
-                print("[Domain_Relevance_Checker] Domain is 'general' — allowing question to proceed")
+            # Use conversation-aware domain checker
+            relevance_result = self.conversation_aware_checker.check_domain_relevance_with_context(
+                question, conversation_history, semantic_schema, chatbot_id
+            )
+            
+            if relevance_result.get("is_follow_up", False):
+                print(f"[Domain_Relevance_Checker] Detected follow-up response: {relevance_result['follow_up_type']}")
+                print(f"[Domain_Relevance_Checker] Original question: {relevance_result.get('original_question', 'N/A')}")
                 state["domain_check_failed"] = False
-                state["detected_domain"] = domain
+                state["is_follow_up"] = True
+                state["follow_up_type"] = relevance_result.get('follow_up_type')
+                state["original_question"] = relevance_result.get('original_question')
                 return state
-
-            # Use LLM to check relevance
-            is_relevant = self._check_relevance_with_llm(question, domain, semantic_schema)
-            
-            if not is_relevant:
-                print(f"[Domain_Relevance_Checker] Question is not relevant to {domain} domain")
-                
-                # Generate dynamic error message using LLM
-                error_message = self._generate_domain_error_message(question, domain, semantic_schema)
-                
-                # Add a special marker to indicate domain check failed
+            elif relevance_result.get("is_relevant", False):
+                print(f"[Domain_Relevance_Checker] Question is relevant to {relevance_result.get('domain', 'unknown')} domain, proceeding")
+                state["domain_check_failed"] = False
+                state["detected_domain"] = relevance_result.get('domain')
+                return state
+            else:
+                print(f"[Domain_Relevance_Checker] Question is not relevant to {relevance_result.get('domain', 'unknown')} domain")
+                error_message = self._generate_domain_error_message(question, relevance_result.get('domain', 'unknown'), semantic_schema)
                 state["domain_check_failed"] = True
                 state["domain_error_message"] = error_message
                 state["messages"].append(SystemMessage(content=f"DOMAIN_CHECK_FAILED: {error_message}"))
                 return state
-            else:
-                print(f"[Domain_Relevance_Checker] Question is relevant to {domain} domain, proceeding")
-                state["domain_check_failed"] = False
-                state["detected_domain"] = domain
-                return state
                 
         except Exception as e:
-            print(f"[Domain_Relevance_Checker] Error during relevance check: {e}")
+            print(f"[Domain_Relevance_Checker] Error during conversation-aware relevance check: {e}")
             # If check fails, proceed with the question to avoid blocking valid queries
             state["domain_check_failed"] = False
             return state
+
+    def _extract_conversation_history(self, state: dict) -> List[Dict]:
+        """Extract conversation history from state for context awareness."""
+        try:
+            conversation_history = []
+            messages = state.get("messages", [])
+            
+            for message in messages:
+                if hasattr(message, 'content'):
+                    content = message.content
+                else:
+                    content = str(message)
+                
+                # Skip system messages
+                if content.startswith("INTENT:") or content.startswith("CLIPPED:") or content.startswith("DOMAIN_CHECK_FAILED:"):
+                    continue
+                
+                # Determine message role
+                if hasattr(message, '__class__'):
+                    if message.__class__.__name__ == "HumanMessage":
+                        role = "user"
+                    elif message.__class__.__name__ == "AIMessage":
+                        role = "assistant"
+                    else:
+                        role = "system"
+                else:
+                    role = "user"  # Default to user
+                
+                conversation_history.append({
+                    "role": role,
+                    "content": content,
+                    "message": content
+                })
+            
+            return conversation_history
+            
+        except Exception as e:
+            print(f"[Domain_Relevance_Checker] Error extracting conversation history: {e}")
+            return []
 
     def _generate_domain_error_message(self, question: str, domain: str, semantic_schema: dict) -> str:
         """Generate a helpful error message using LLM when question is not relevant."""

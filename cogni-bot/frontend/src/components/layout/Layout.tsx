@@ -66,9 +66,9 @@ const Layout: React.FC = () => {
               <Sidebar />
 
               <main className="flex-1 overflow-hidden flex flex-col">
-                <div className="flex flex-1 min-h-0">
+                <div className="flex flex-1 min-h-0 relative">
                   {/* Chat Area */}
-                  <div className="flex-1 overflow-hidden p-4">
+                  <div className="flex-1 overflow-hidden p-4 transition-all duration-300">
                     {selectedConversationId ? (
                       isTestSuite ? (
                         <TestSuiteInterface />

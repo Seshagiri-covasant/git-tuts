@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 import { getAllInteractions, createInteraction, getQuery, getConversationStatus, rateInteraction, getInteractionRating, getConversationInteractionCount, getBAInsights, getVisualization, getInteractionResultMeta, getInteractionResultPage } from "../../services/api";
 import { InteractionResultMeta } from "../../types";
-import { Send, Mic, MicOff, Bug, X, Lightbulb, BarChart3, ThumbsUp, ThumbsDown, Download, Paperclip, FileText, FileIcon, AlertTriangle, MessageSquare, Database, Copy, Check } from "lucide-react";
+import { Send, Mic, MicOff, Bug, X, Lightbulb, BarChart3, Download, Paperclip, FileText, FileIcon, AlertTriangle, MessageSquare, Database } from "lucide-react";
+import { DebugPanel } from "../DebugPanel";
 import VoiceControls from "./VoiceControls";
 import ProcessingStatusIndicator from "../ProcessingStatusIndicator";
 import BAInsightsModal from '../../Modals/BAInsightsModal';
@@ -32,17 +33,11 @@ const ChatInterface: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
-  const [showDebugModal, setShowDebugModal] = useState(false);
-  const [debugData, setDebugData] = useState<any>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [debugSteps, setDebugSteps] = useState<any[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeight = useRef(0);
-  // const { chatbotId } = useParams();
-  // const currentConversation = conversations.find(
-  //   (conv) =>
-  //     conv.conversationId === selectedConversationId ||
-  //     chatbotId === conv.chatbotId
-  // );
+  const [debugData, setDebugData] = useState<any>(null);
   const [interaction, setInteraction] = useState<any[]>([]);
   const [isLast, setIsLast] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -68,9 +63,16 @@ const ChatInterface: React.FC = () => {
   const [, setPollingError] = useState<string | null>(null);
   const [, setPollingFailureCount] = useState(0);
 
-  // Clarification suggestions state
+  // Enhanced clarification state for human-in-the-loop
   const [clarificationSuggestions, setClarificationSuggestions] = useState<string[]>([]);
   const [showClarificationBar, setShowClarificationBar] = useState<boolean>(true);
+  const [clarificationContext, setClarificationContext] = useState<{
+    priority: string;
+    question: string;
+    step: number;
+    totalSteps: number;
+  } | null>(null);
+  const [isInClarificationMode, setIsInClarificationMode] = useState<boolean>(false);
 
   const [baModalOpen, setBaModalOpen] = useState(false);
   const [baModalSummary, setBaModalSummary] = useState<string | null>(null);
@@ -270,22 +272,24 @@ const ChatInterface: React.FC = () => {
     }
   }, [interaction, page]);
 
-  // Extract clarification suggestions from assistant message content
-  const parseClarificationSuggestions = (content: string): string[] => {
+  // Enhanced clarification parsing for human-in-the-loop
+  const parseClarificationSuggestions = (content: string): { suggestions: string[], context?: any } => {
     try {
       const marker = 'CLARIFICATION_NEEDED:';
       let text = content;
       if (content.startsWith(marker)) {
         text = content.slice(marker.length).trim();
       }
+      
       // Try to extract JSON array first
       const jsonMatch = text.match(/\[(.|\n|\r)*\]/);
       if (jsonMatch) {
         const arr = JSON.parse(jsonMatch[0]);
         if (Array.isArray(arr)) {
-          return arr.map((s) => String(s)).slice(0, 3);
+          return { suggestions: arr.map((s) => String(s)).slice(0, 3) };
         }
       }
+      
       // Fallback: capture lines like "1. suggestion" up to 3 items
       const lines = text.split(/\r?\n/).map((l) => l.trim());
       const numbered = lines
@@ -294,9 +298,20 @@ const ChatInterface: React.FC = () => {
           return m ? m[1].trim() : null;
         })
         .filter((s): s is string => Boolean(s));
-      if (numbered.length >= 1) return numbered.slice(0, 3);
+      
+      if (numbered.length >= 1) {
+        return { suggestions: numbered.slice(0, 3) };
+      }
+      
+      // Check for targeted questions (new format)
+      if (text.includes("I need a bit more information") || text.includes("Which of these tables")) {
+        return { 
+          suggestions: [text], 
+          context: { isTargetedQuestion: true }
+        };
+      }
     } catch {}
-    return [];
+    return { suggestions: [] };
   };
 
   const getAllInteraction = useCallback(async (pageNo: number, appendToTop: boolean) => {
@@ -444,7 +459,7 @@ const ChatInterface: React.FC = () => {
     });
   }, [interaction]);
 
-  // Watch latest assistant message for clarification suggestions (after displayedInteractions exists)
+  // Enhanced clarification detection for human-in-the-loop
   useEffect(() => {
     if (!displayedInteractions || displayedInteractions.length === 0) return;
     const lastAssistant = [...displayedInteractions]
@@ -454,15 +469,28 @@ const ChatInterface: React.FC = () => {
 
     const content: string = lastAssistant.content || '';
     if (typeof content === 'string' && content.includes('CLARIFICATION_NEEDED:')) {
-      const suggestions = parseClarificationSuggestions(content);
-      if (suggestions.length) {
-        setClarificationSuggestions(suggestions);
+      const parsed = parseClarificationSuggestions(content);
+      if (parsed.suggestions.length) {
+        setClarificationSuggestions(parsed.suggestions);
         setShowClarificationBar(true);
+        setIsInClarificationMode(true);
+        
+        // Extract context if available
+        if (parsed.context?.isTargetedQuestion) {
+          setClarificationContext({
+            priority: 'general',
+            question: parsed.suggestions[0],
+            step: 1,
+            totalSteps: 5
+          });
+        }
       }
     } else {
       // Clear on normal assistant responses
       setClarificationSuggestions([]);
       setShowClarificationBar(false);
+      setIsInClarificationMode(false);
+      setClarificationContext(null);
     }
   }, [displayedInteractions]);
 
@@ -669,9 +697,17 @@ const ChatInterface: React.FC = () => {
     }, 100);
 
     try {
-      // Send to backend
-      await createInteraction(selectedConversationId, message, llmName);
-      
+      // Send to backend and capture immediate debug info
+      const resp = await createInteraction(selectedConversationId, message, llmName);
+      // If backend returned debug steps, show them immediately
+      try {
+        const steps = resp?.debug?.steps;
+        if (Array.isArray(steps) && steps.length > 0) {
+          setDebugSteps(steps);
+          setShowDebugPanel(true);
+        }
+      } catch {}
+
       // Start polling for the actual response
       setPollingForPending(true);
       setPollingError(null); // Clear any previous errors
@@ -719,29 +755,31 @@ const ChatInterface: React.FC = () => {
     const msg = displayedInteractions.find(
       (m) => m.interactionId === interactionId && m.role === "assistant"
     );
-    let cleanedQuery = null;
+    
     if (msg) {
-      // Try to parse cleaned_query from the message content
       try {
         const parsed = JSON.parse(msg.content);
-        if (parsed && typeof parsed === 'object') {
-          if (parsed.cleaned_query) cleanedQuery = parsed.cleaned_query;
+        if (parsed && typeof parsed === 'object' && parsed.debug?.steps) {
+          setDebugSteps(parsed.debug.steps);
+          setShowDebugPanel(true);
+          return;
         }
-      } catch {}
+      } catch (e) {
+        console.error('Error parsing debug information:', e);
+      }
     }
-    if (cleanedQuery) {
-      setDebugData({ cleaned_query: cleanedQuery });
-      setShowDebugModal(true);
-      return;
-    }
+
     // Fallback: fetch from backend
     try {
       const response = await getQuery(conversationId, interactionId);
+      if (response.data?.debug?.steps) {
+        setDebugSteps(response.data.debug.steps);
+        setShowDebugPanel(true);
+      }
       setDebugData(response.data);
-      setShowDebugModal(true);
     } catch (error) {
-      setDebugData({ cleaned_query: 'Error fetching debug info.' });
-      setShowDebugModal(true);
+      console.error('Error fetching debug info:', error);
+      setDebugData(null);
     }
   };
 
@@ -846,14 +884,14 @@ const ChatInterface: React.FC = () => {
     }
   };
 
-  const handleCopySql = async () => {
+  const copyToClipboard = async (text: string) => {
     try {
-      const sqlText = debugData?.cleaned_query || '';
-      if (!sqlText) return;
-      await navigator.clipboard.writeText(sqlText);
-      setCopiedSql(true);
-      setTimeout(() => setCopiedSql(false), 1500);
-    } catch {}
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      console.log('Copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
   };
 
   // State to hold BA context for regeneration
@@ -1093,7 +1131,7 @@ const ChatInterface: React.FC = () => {
           </div>
         </div>
       )}
-      <div className="flex flex-col h-full min-h-0 bg-white dark:bg-gray-900">
+      <div className={`flex flex-col h-full min-h-0 bg-white dark:bg-gray-900 transition-all duration-300 ${showDebugPanel ? 'pr-96' : ''}`}>
         {/* Chat header */}
         <div className="pb-3 px-4 border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center justify-between">
@@ -1193,7 +1231,7 @@ const ChatInterface: React.FC = () => {
         </div>
 
         {/* Messages area */}
-        <div className="flex-1 overflow-y-auto flex-col-reverse p-2 space-y-4 mt-2" onScroll={handleScroll} ref={containerRef}>
+        <div className={`flex-1 overflow-y-auto flex-col-reverse p-2 space-y-4 mt-2 transition-all duration-300 ${showDebugPanel ? 'mr-96' : ''}`} onScroll={handleScroll} ref={containerRef}>
           {conversationLoading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-gray-500 dark:text-gray-400">
@@ -1244,13 +1282,8 @@ const ChatInterface: React.FC = () => {
                 const parsedContent = parseJsonContent(msg.content);
                 const isJsonArray = Array.isArray(parsedContent);
                 const isJsonObject = parsedContent && typeof parsedContent === 'object' && !Array.isArray(parsedContent);
-                
-                // Check if it's the new format with data and metadata
                 const isNewFormat = isJsonObject && parsedContent.data && parsedContent.metadata;
                 const metaForIx = resultMeta[msg.interactionId];
-                
-
-                // Find the user message for this interaction
                 const userMsg = displayedInteractions.find(
                   (m) => m.interactionId === msg.interactionId && m.role === "user"
                 );
@@ -1282,7 +1315,7 @@ const ChatInterface: React.FC = () => {
                                 // Handle new format with pagination
                                 if (isNewFormat && parsedContent.data) {
                                   const allRows = parsedContent.data;
-                                  const columns = parsedContent.metadata?.columns || (allRows.length > 0 ? Object.keys(allRows[0]) : []);
+                                  const headers = parsedContent.metadata?.columns || (allRows.length > 0 ? Object.keys(allRows[0]) : []);
                                   const totalRows = allRows.length;
                                   
                                   // Use UI pagination settings
@@ -1620,33 +1653,64 @@ const ChatInterface: React.FC = () => {
           }}
         />}
 
-        {/* Clarification suggestions bar (chips) */}
+        {/* Enhanced clarification bar for human-in-the-loop */}
         {showClarificationBar && clarificationSuggestions.length > 0 && (
           <div className="px-4 pt-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                Suggestions (click to fill):
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                  {isInClarificationMode ? "🤖 I need clarification:" : "💡 Quick suggestions:"}
+                </div>
+                {clarificationContext && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Step {clarificationContext.step} of {clarificationContext.totalSteps}
+                  </div>
+                )}
               </div>
               <button
                 className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 onClick={() => setShowClarificationBar(false)}
                 title="Hide suggestions"
               >
-                Hide
+                ✕
               </button>
             </div>
+            
+            {/* Progress indicator for clarification mode */}
+            {isInClarificationMode && clarificationContext && (
+              <div className="mb-3">
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                  <div 
+                    className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${(clarificationContext.step / clarificationContext.totalSteps) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+            
             <div className="flex flex-wrap gap-2">
               {clarificationSuggestions.map((s, idx) => (
                 <button
                   key={idx}
                   onClick={() => handlePickSuggestion(s)}
-                  className="max-w-full truncate px-3 py-1.5 text-xs rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-                  title={s}
+                  className={`max-w-full truncate px-4 py-2 text-sm rounded-lg border-2 transition-all duration-200 transform hover:scale-105 ${
+                    isInClarificationMode 
+                      ? 'border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/40 shadow-md hover:shadow-lg' 
+                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400'
+                  }`}
+                  title={`Click to use: ${s}`}
                 >
                   {s}
                 </button>
               ))}
             </div>
+            
+            {/* Additional context for clarification mode */}
+            {isInClarificationMode && (
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                💡 Please provide your answer so I can generate the most accurate query for you.
+              </div>
+            )}
           </div>
         )}
 
@@ -1793,54 +1857,9 @@ const ChatInterface: React.FC = () => {
           </div>
         </div>
 
-        {/* Debug Modal */}
-        {showDebugModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 max-w-4xl w-full shadow-lg overflow-auto max-h-[80vh]">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold modalHead">Debug Info</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleCopySql}
-                    className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center gap-2"
-                    title="Copy SQL"
-                  >
-                    {copiedSql ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    {copiedSql ? 'Copied' : ''}
-                  </button>
-                  <button
-                    onClick={() => setShowDebugModal(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <X className="w-5 h-5 text-gray-500" />
-                  </button>
-                </div>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-lg font-medium mb-2 text-gray-800 dark:text-gray-200">SQL Query:</h3>
-                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border">
-                    <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words overflow-x-auto">
-                      {debugData?.cleaned_query || 'No cleaned query available'}
-                    </pre>
-                  </div>
-                </div>
-                
-                {debugData?.final_result && (
-                  <div>
-                    <h3 className="text-lg font-medium mb-2 text-gray-800 dark:text-gray-200">Final Result:</h3>
-                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border">
-                      <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words overflow-x-auto">
-                        {JSON.stringify(JSON.parse(debugData.final_result), null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Debug Panel */}
+        <DebugPanel steps={debugSteps} isVisible={showDebugPanel} />
+        
 
         {/* Processing Status Indicator */}
         {(() => {

@@ -38,6 +38,28 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  debug?: {
+    steps: {
+      step: string;
+      status: string;
+      details: {
+        intent?: {
+          tables: string[];
+          columns: string[];
+          filters: string[];
+          joins: string[];
+          order_by: string[];
+          date_range: string | null;
+        };
+        keywords?: string[];
+        generatedSQL?: string;
+        clarificationNeeded?: boolean;
+        clarificationReason?: string;
+        validationErrors?: string[];
+      };
+      timestamp: string;
+    }[];
+  };
 }
 
 export interface LLMSettings {

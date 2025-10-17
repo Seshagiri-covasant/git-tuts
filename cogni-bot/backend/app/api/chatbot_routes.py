@@ -122,3 +122,35 @@ def update_chatbot_semantic_schema(chatbot_id):
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@app.route("/chatbots/<chatbot_id>/semantic-schema/export", methods=["GET"])
+def export_chatbot_semantic_schema(chatbot_id):
+    """
+    Exports the semantic schema for a chatbot as CSV.
+    """
+    try:
+        result = chatbot_service.export_semantic_schema_service(chatbot_id)
+        return result
+    except Exception as e:
+        logger.error(f"Unhandled error in export_chatbot_semantic_schema for {chatbot_id}: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@app.route("/chatbots/<chatbot_id>/semantic-schema/import", methods=["POST"])
+def import_chatbot_semantic_schema(chatbot_id):
+    """
+    Imports a semantic schema for a chatbot from CSV.
+    """
+    try:
+        result = chatbot_service.import_semantic_schema_service(chatbot_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Unhandled error in import_chatbot_semantic_schema for {chatbot_id}: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500

@@ -278,7 +278,8 @@ const StandaloneChatbot: React.FC = () => {
         content: response.final_result || response.response || 'I received your message.',
         timestamp: new Date(),
         data: response.raw_result_set,
-        sql: response.cleaned_query
+        sql: response.cleaned_query,
+        debug: response.debug
       };
 
       console.log('Adding assistant message:', assistantMessage);

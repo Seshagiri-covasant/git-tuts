@@ -285,6 +285,18 @@ export const getConversationStatus = async (conversationId: string) => {
   }
 };
 
+// Debug Information
+export const getDebugInformation = async (conversationId: string, interactionId: string) => {
+  try {
+    const response = await api.get(`/api/interactions/${interactionId}/debug`, {
+      params: { conversation_id: conversationId }
+    });
+    return response.data;
+  } catch (error) {
+    throw error;
+  }
+};
+
 // LLM Settings
 export const setLLMSettings = async (chatbotId:any, llmName:any, temperature?: number) => {
   const payload: any = { llm_name: llmName };
@@ -462,6 +474,38 @@ export const getSemanticSchema = async (chatbotId: string) => {
 export const updateSemanticSchema = async (chatbotId: string, semanticSchema: any) => {
   return api.put(`/api/chatbots/${chatbotId}/semantic-schema`, {
     semantic_schema: semanticSchema
+  });
+};
+
+// Export semantic schema as CSV
+export const exportSemanticSchema = async (chatbotId: string) => {
+  const response = await api.get(`/api/chatbots/${chatbotId}/semantic-schema/export`, {
+    responseType: 'blob'
+  });
+  
+  // Create download link
+  const blob = new Blob([response.data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `schema_${chatbotId}_${new Date().toISOString().split('T')[0]}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+  
+  return response;
+};
+
+// Import semantic schema from CSV
+export const importSemanticSchema = async (chatbotId: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  return api.post(`/api/chatbots/${chatbotId}/semantic-schema/import`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
   });
 };
 

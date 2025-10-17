@@ -94,6 +94,13 @@ def create_interaction_service(conversation_id: str):
     if not agent_response:
         raise ServiceException("No response from agent", 500)
 
+    # HITL: Check if the agent is asking a clarifying question
+    if agent_response.get("question"):
+        return {
+            "question": agent_response["question"],
+            "interaction_type": "clarification"
+        }
+
     db = get_chatbot_db()
     with monitored_database_operation("create_interaction", "chatbot_main"):
         interaction = db.create_interaction(
@@ -185,7 +192,8 @@ def create_interaction_service(conversation_id: str):
         "final_result": agent_response.get("final_result"),
         "cleaned_query": agent_response.get("cleaned_query"),
         "result_meta": result_meta,
-        "ba_summary": agent_response.get("ba_summary")
+        "ba_summary": agent_response.get("ba_summary"),
+        "debug": agent_response.get("debug")
     }
 
 def get_interaction_result_meta_service(interaction_id: str):

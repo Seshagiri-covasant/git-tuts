@@ -87,12 +87,14 @@ HARD RULES (ZERO-TOLERANCE)
 11) COMMON SYNTAX ERRORS TO AVOID
    - NEVER merge table aliases with keywords: "EKKOGROUP BY" → "GROUP BY"
    - NEVER merge keywords: "GROUPBY" → "GROUP BY"
-   - NEVER put conditions after FROM: "FROM table1 = table2" → "FROM table1 AS t1 INNER JOIN table2 AS t2 ON t1.key = t2.key"
-   - NEVER use incomplete JOIN syntax: "FROM INNER JOIN" → "FROM table1 AS t1 INNER JOIN table2 AS t2 ON ..."
+   - NEVER put conditions after FROM:   - ALWAYS put each clause on a new line with proper spacing
+   - ALWAYS use complete ke   - NEVER use incomplete JOIN syntax: "FROM INNER JOIN" → "FROM table1 AS t1 INNER JOIN table2 AS t2 ON ..."
    - ALWAYS put each clause on a new line with proper spacing
    - ALWAYS use complete keywords: "GROUP BY", "ORDER BY", "INNER JOIN", etc.
 
 12) REMEMBER, THIS IS VERY IMPORTANT, MAINTAIN PROPER SPACING BETWEEN WORDS IN THE GENERATED SQL COMMAND. DONT MERGE WORDS AS IT WILL CAUSE ERRORS AND THE QUERY WONT EXECUTE. NEVER MERGE LIKE THIS: 'EKKO.EBELNWHERE' . THIS IS WRONG , INSTEAD IT SHOULD BE LIKE 'EKKO.EBELN WHERE' . REMEMBER THIS IS VERY IMPORTANT.
+ANT.
+ANT.
  
 OUTPUT FORMAT
 - Return a single-line JSON object like: {"sql": "SELECT ..."}

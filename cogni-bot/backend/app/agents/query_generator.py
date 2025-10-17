@@ -357,7 +357,8 @@ class QueryGeneratorAgent:
             
             intent_tables = intent.get('tables') or []
             intent_columns = intent.get('columns') or []
-            intent_text = f"INTENT TABLES: {intent_tables}\nINTENT COLUMNS: {intent_columns}\nFILTERS: {intent.get('filters')}\nJOINS: {intent.get('joins')}\nORDER_BY: {intent.get('order_by')}\nDATE_RANGE: {intent.get('date_range')}"
+            intent_aggregations = intent.get('aggregations') or []
+            intent_text = f"INTENT TABLES: {intent_tables}\nINTENT COLUMNS: {intent_columns}\nINTENT AGGREGATIONS: {intent_aggregations}\nFILTERS: {intent.get('filters')}\nJOINS: {intent.get('joins')}\nORDER_BY: {intent.get('order_by')}\nDATE_RANGE: {intent.get('date_range')}"
 
             # Now that we have clipped context, build database-specific instructions
             if db_instructions is None:
@@ -489,13 +490,24 @@ INSTRUCTIONS:
  4. Generate syntactically correct {db_type.upper()} SQL.
  5. Use proper table aliases for clarity and qualify all columns.
  6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
+ 7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
 
 Generate the SQL query:"""
 
+            # LOGGING: What data is being sent to LLM
+            print(f"\n{'='*60}")
+            print(f"QUERY GENERATOR: Data being sent to LLM")
+            print(f"{'='*60}")
+            print(f"Prompt Length: {len(enhanced_prompt)} characters")
+            print(f"Available Tables: {allowed_tables_str if allowed_tables_str else 'None'}")
+            print(f"Relationship Limit: {relationship_limit}")
+            print(f"Context Length: {len(clipped_limited)} characters")
+            print(f"User Question: {question}")
+            print(f"{'='*60}\n")
+            
             # Use invoke() for LLM call with timeout handling
             try:
                 print(f"[Query_Generator] Calling LLM with prompt length: {len(enhanced_prompt)} (using {relationship_limit} relationships)")
-                print(enhanced_prompt)
                 response = self.llm.invoke(enhanced_prompt)
                 print(f"[Query_Generator] LLM response received")
             except Exception as e:
@@ -503,7 +515,23 @@ Generate the SQL query:"""
                 return {"messages": ["Error generating SQL query. Please try again."]}
 
             # Extract and clean SQL from response
+            print(f"\n{'='*60}")
+            print(f"LLM RESPONSE ANALYSIS")
+            print(f"{'='*60}")
+            print(f"Raw LLM Response: {response}")
+            print(f"Response Type: {type(response)}")
+            if hasattr(response, 'content'):
+                print(f"Response Content: {response.content}")
+            print(f"{'='*60}\n")
+            
             sql = self._extract_sql_from_response(response)
+            
+            print(f"\n{'='*60}")
+            print(f"EXTRACTED SQL")
+            print(f"{'='*60}")
+            print(f"Extracted SQL: {sql}")
+            print(f"SQL Length: {len(sql)} characters")
+            print(f"{'='*60}\n")
 
             # Post-process: if scaffold exists but LLM omitted or broke it, inject/replace deterministically
             try:
@@ -530,6 +558,14 @@ Generate the SQL query:"""
             except Exception:
                 pass
 
-            return {"messages": [sql]}
+            # CRITICAL FIX: Store SQL in multiple places for different agents to find
+            return {
+                "messages": [sql],
+                "generated_sql": sql,
+                "sql_query": sql,
+                "sql": sql,  # Add this for query validator/executor
+                "query": sql,  # Add this for query validator/executor
+                "final_sql": sql  # Add this for query validator/executor
+            }
         except Exception as e:
             raise QueryGenerationException(e)

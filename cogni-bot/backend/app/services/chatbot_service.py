@@ -246,11 +246,18 @@ def configure_database_service(chatbot_id: str):
         schema_message = "Database configured but schema extraction failed"
 
     
+    # Store selected_tables as JSON string
+    selected_tables_json = None
+    if db_config.get('selected_tables'):
+        import json
+        selected_tables_json = json.dumps(db_config.get('selected_tables'))
+    
     update_params = {
         "chatbot_id": chatbot_id,
         "db_type": db_type,
         "db_url": db_url,
         "schema_name": db_config.get('schema_name'),
+        "selected_tables": selected_tables_json,
         # After successfully configuring the application database we should mark the
         # chatbot as DB_CONFIGURED (not LLM_CONFIGURED). This ensures status ordering
         # checks that rely on ChatbotStatus behave correctly.
@@ -279,13 +286,35 @@ def get_schema_service(chatbot_id: str):
        
         logger.info(f"Database URL: {db_url}")
         logger.info(f"Database type: {db_type}")
+        logger.info(f"Schema name: {chatbot.get('schema_name')}")
+        logger.info(f"Selected tables (raw): {chatbot.get('selected_tables')}")
+        logger.info(f"Selected tables type: {type(chatbot.get('selected_tables'))}")
+        logger.info(f"Chatbot keys: {list(chatbot.keys())}")
        
         # Extract schema directly
         logger.info("Extracting schema...")
         try:
+            # Parse selected_tables from JSON string if available
+            selected_tables = None
+            logger.info(f"Checking selected_tables: {chatbot.get('selected_tables')}")
+            if chatbot.get("selected_tables"):
+                try:
+                    import json
+                    selected_tables = json.loads(chatbot.get("selected_tables"))
+                    logger.info(f"[SUCCESS] Parsed selected_tables: {selected_tables}")
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"[ERROR] Failed to parse selected_tables: {e}")
+                    selected_tables = None
+            else:
+                logger.warning(f"[ERROR] No selected_tables found in chatbot data")
+            
             # The SchemaExtractor should be used within a 'with' statement if possible,
             # but since it has a __del__ method, this is also safe.
-            schema_extractor = SchemaExtractor(db_url, db_type, credentials_json)
+            schema_extractor = SchemaExtractor(
+                db_url, db_type, credentials_json,
+                schema_name=chatbot.get("schema_name"),
+                selected_tables=selected_tables
+            )
             logger.info("Schema extractor created successfully")
            
             schema_info = schema_extractor.extract_schema()
@@ -609,6 +638,10 @@ def get_semantic_schema_service(chatbot_id: str):
 
                     cols = t.get("columns", {}) or {}
                     for c_name, c in list(cols.items()):
+                        # Debug: Check business_context field
+                        if c_name in ['AdditionalPaymentID', 'VendorNumber', 'VendorName']:
+                            print(f"DEBUG: Column {t_name}.{c_name} business_context before normalization: {c.get('business_context')}")
+                        
                         # fk may be boolean; model expects object or None
                         if isinstance(c.get("fk"), bool):
                             if c.get("fk") and isinstance(c.get("fk_ref"), dict):
@@ -633,6 +666,10 @@ def get_semantic_schema_service(chatbot_id: str):
                                 })
                         c["synonyms"] = norm_syns
                         print(f"DEBUG: Column {t_name}.{c_name} synonyms normalized: {norm_syns}")
+                        
+                        # Debug: Check business_context field after normalization
+                        if c_name in ['AdditionalPaymentID', 'VendorNumber', 'VendorName']:
+                            print(f"DEBUG: Column {t_name}.{c_name} business_context after normalization: {c.get('business_context')}")
 
                 # Relationships: ensure synonyms are strings
                 rels = data.get("relationships", []) or []
@@ -662,7 +699,9 @@ def get_semantic_schema_service(chatbot_id: str):
             raise validation_error
 
         # Return the parsed data as a dictionary using the clean structure
-        return semantic_schema.to_json_dict()
+        result = semantic_schema.to_json_dict()
+        
+        return result
 
     except json.JSONDecodeError as json_error:
         logger.error(
@@ -691,6 +730,31 @@ def update_semantic_schema_service(chatbot_id: str):
         raise ServiceException(
             "A 'semantic_schema' object is required in the request body", 400)
 
+    # 🔍 LOGGING: Track schema updates
+    print(f"\n{'='*80}")
+    print(f"UPDATE SEMANTIC SCHEMA: Updating schema for chatbot {chatbot_id}")
+    print(f"{'='*80}")
+    print(f"Schema keys: {list(semantic_schema_data.keys()) if isinstance(semantic_schema_data, dict) else 'Not a dict'}")
+    print(f"Tables: {len(semantic_schema_data.get('tables', {}))}")
+    print(f"Metrics: {len(semantic_schema_data.get('metrics', []))}")
+    print(f"Metrics data: {semantic_schema_data.get('metrics', [])}")
+    
+    # Log business metrics being updated
+    for metric in semantic_schema_data.get('metrics', []):
+        print(f"  Metric: {metric.get('name', 'Unknown')} = {metric.get('expression', 'No expression')}")
+    
+    # Log tables with business context
+    for table_name, table_data in semantic_schema_data.get('tables', {}).items():
+        if table_data.get('business_context'):
+            print(f"  Table {table_name}: {table_data.get('business_context')}")
+        
+        # Log columns with business context
+        for col_name, col_data in table_data.get('columns', {}).items():
+            if col_data.get('business_context'):
+                print(f"  Column {table_name}.{col_name}: {col_data.get('business_context')}")
+    
+    print(f"{'='*80}\n")
+    
     # Validate the incoming schema data using the Pydantic model
     try:
         logger.info(f"Validating semantic schema for chatbot {chatbot_id}")
@@ -785,6 +849,12 @@ def update_semantic_schema_service(chatbot_id: str):
         success = db.store_semantic_schema(chatbot_id, semantic_schema_json)
         logger.info(f"Database storage result: {success}")
         
+        # 🔍 LOGGING: Track database storage result
+        if success:
+            print(f"✅ Schema successfully updated in database for chatbot {chatbot_id}")
+        else:
+            print(f"❌ Failed to update schema in database for chatbot {chatbot_id}")
+        
         # Rebuild knowledge cache with updated schema
         if success:
             try:
@@ -806,3 +876,387 @@ def update_semantic_schema_service(chatbot_id: str):
             "Failed to store semantic schema in the database", 500)
 
     return {"message": "Semantic schema updated successfully", "chatbot_id": chatbot_id}
+
+
+def export_semantic_schema_service(chatbot_id: str):
+    """
+    Service logic for exporting the semantic schema for a chatbot as CSV.
+    """
+    get_chatbot_with_validation(chatbot_id)  # Validate chatbot exists
+    db = get_chatbot_db()
+
+    semantic_schema_json = db.get_semantic_schema(chatbot_id)
+
+    if not semantic_schema_json:
+        raise ServiceException(
+            "No semantic schema found for this chatbot", 404)
+
+    try:
+        import json
+        import csv
+        import io
+        from flask import Response
+        
+        semantic_schema_data = json.loads(semantic_schema_json)
+        
+        # Create CSV content
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Table Name',
+            'Column Name', 
+            'Description',
+            'Business Context',
+            'Exclude Column',
+            'Data Type',
+            'Is Primary Key',
+            'Is Foreign Key'
+        ])
+        
+        # Write data rows
+        tables = semantic_schema_data.get('tables', {})
+        for table_id, table in tables.items():
+            columns = table.get('columns', {})
+            for column_id, column in columns.items():
+                writer.writerow([
+                    table.get('display_name', table_id),
+                    column.get('display_name', column_id),
+                    column.get('description', ''),
+                    column.get('business_context', ''),
+                    'Yes' if column.get('exclude_column', False) else 'No',
+                    column.get('data_type', column.get('type', '')),
+                    'Yes' if column.get('is_primary_key', column.get('pk', False)) else 'No',
+                    'Yes' if column.get('is_foreign_key', column.get('fk', False)) else 'No'
+                ])
+        
+        # Create response
+        output.seek(0)
+        csv_content = output.getvalue()
+        output.close()
+        
+        return Response(
+            csv_content,
+            mimetype='text/csv',
+            headers={
+                'Content-Disposition': f'attachment; filename=schema_{chatbot_id}_{semantic_schema_data.get("display_name", "export")}.csv'
+            }
+        )
+        
+    except json.JSONDecodeError as json_error:
+        logger.error(f"Failed to parse JSON for chatbot {chatbot_id}: {str(json_error)}")
+        raise ServiceException("Invalid JSON format in stored semantic schema", 500)
+    except Exception as parse_error:
+        logger.error(f"Failed to export semantic schema for chatbot {chatbot_id}: {str(parse_error)}")
+        raise ServiceException("Failed to export semantic schema", 500)
+
+
+def import_semantic_schema_service(chatbot_id: str):
+    """
+    Service logic for importing a semantic schema for a chatbot from CSV.
+    """
+    get_chatbot_with_validation(chatbot_id)  # Validate chatbot exists
+    
+    if not request.files:
+        raise ServiceException("No file provided", 400)
+    
+    file = request.files.get('file')
+    if not file:
+        raise ServiceException("No file provided", 400)
+    
+    if not file.filename.lower().endswith(('.csv', '.xlsx', '.xls')):
+        raise ServiceException("File must be CSV or Excel format", 400)
+    
+    try:
+        import json
+        import csv
+        import io
+        import pandas as pd
+        
+        # Read file content based on file type
+        if file.filename.lower().endswith('.csv'):
+            # Handle CSV files
+            content = file.read().decode('utf-8')
+            lines = content.split('\n')
+            
+            if len(lines) < 2:
+                raise ServiceException("Invalid CSV format - must have header and data rows", 400)
+            
+            # Parse CSV
+            reader = csv.reader(lines)
+            headers = next(reader)
+            rows = list(reader)
+        else:
+            # Handle Excel files using pandas
+            try:
+                # Reset file pointer
+                file.seek(0)
+                
+                # Read Excel file
+                if file.filename.lower().endswith('.xlsx'):
+                    df = pd.read_excel(file, engine='openpyxl')
+                elif file.filename.lower().endswith('.xls'):
+                    df = pd.read_excel(file, engine='xlrd')
+                else:
+                    raise ServiceException("Unsupported file format", 400)
+                
+                if df.empty:
+                    raise ServiceException("Excel file is empty", 400)
+                
+                # Convert to list format for processing
+                headers = df.columns.tolist()
+                rows = df.values.tolist()
+                
+                logger.info(f"Successfully read Excel file with {len(rows)} rows and {len(headers)} columns")
+                
+            except Exception as excel_error:
+                logger.error(f"Error reading Excel file: {str(excel_error)}")
+                raise ServiceException(f"Failed to read Excel file: {str(excel_error)}", 400)
+        
+        # Find column indices
+        logger.info(f"Available columns in uploaded file: {headers}")
+        
+        table_name_idx = headers.index('Table Name') if 'Table Name' in headers else -1
+        column_name_idx = headers.index('Column Name') if 'Column Name' in headers else -1
+        description_idx = headers.index('Description') if 'Description' in headers else -1
+        business_context_idx = headers.index('Business Context') if 'Business Context' in headers else -1
+        exclude_column_idx = headers.index('Exclude Column') if 'Exclude Column' in headers else -1
+        
+        # Try alternative names for required columns first
+        if table_name_idx == -1:
+            # Try alternative names for table
+            alt_table_names = ['table_name', 'Table', 'table', 'TABLE_NAME', 'TableName', 'table name']
+            for alt_name in alt_table_names:
+                if alt_name in headers:
+                    table_name_idx = headers.index(alt_name)
+                    logger.info(f"Found table column with alternative name: {alt_name}")
+                    break
+
+        if column_name_idx == -1:
+            # Try alternative names for column
+            alt_column_names = ['column_name', 'Column', 'column', 'COLUMN_NAME', 'ColumnName', 'column name']
+            for alt_name in alt_column_names:
+                if alt_name in headers:
+                    column_name_idx = headers.index(alt_name)
+                    logger.info(f"Found column with alternative name: {alt_name}")
+                    break
+        
+        # Try alternative names for optional columns
+        if description_idx == -1:
+            alt_desc_names = ['description', 'Description', 'DESCRIPTION', 'desc', 'Desc', 'description']
+            for alt_name in alt_desc_names:
+                if alt_name in headers:
+                    description_idx = headers.index(alt_name)
+                    logger.info(f"Found description column with alternative name: {alt_name}")
+                    break
+
+        if business_context_idx == -1:
+            alt_bc_names = ['business_context', 'Business Context', 'BUSINESS_CONTEXT', 'business context', 'BusinessContext']
+            for alt_name in alt_bc_names:
+                if alt_name in headers:
+                    business_context_idx = headers.index(alt_name)
+                    logger.info(f"Found business context column with alternative name: {alt_name}")
+                    break
+        
+        if exclude_column_idx == -1:
+            alt_exclude_names = ['exclude_column', 'Exclude Column', 'EXCLUDE_COLUMN', 'exclude column', 'ExcludeColumn', 'exclude', 'Exclude']
+            for alt_name in alt_exclude_names:
+                if alt_name in headers:
+                    exclude_column_idx = headers.index(alt_name)
+                    logger.info(f"Found exclude column with alternative name: {alt_name}")
+                    break
+        
+        if table_name_idx == -1 or column_name_idx == -1:
+            error_msg = f"Required columns not found. Available columns: {headers}. "
+            error_msg += f"Looking for 'Table Name' (found: {table_name_idx != -1}) and 'Column Name' (found: {column_name_idx != -1}). "
+            error_msg += "Please ensure your file has columns named 'Table Name' and 'Column Name'. "
+            error_msg += "You can export a schema first to see the expected format."
+            logger.error(error_msg)
+            raise ServiceException(error_msg, 400)
+        
+        # Get current schema
+        db = get_chatbot_db()
+        semantic_schema_json = db.get_semantic_schema(chatbot_id)
+        
+        if not semantic_schema_json:
+            raise ServiceException("No semantic schema found for this chatbot", 404)
+        
+        semantic_schema_data = json.loads(semantic_schema_json)
+        
+        # Create mapping of imported data
+        imported_data = {}
+        
+        logger.info(f"CSV Headers: {headers}")
+        logger.info(f"Column indices - Table: {table_name_idx}, Column: {column_name_idx}, Description: {description_idx}, Business Context: {business_context_idx}, Exclude: {exclude_column_idx}")
+        
+        # Debug: Check if business context column was found
+        if business_context_idx == -1:
+            logger.warning("Business Context column not found in uploaded file")
+            logger.warning(f"Available headers: {headers}")
+        else:
+            logger.info(f"Business Context column found at index {business_context_idx}: '{headers[business_context_idx]}'")
+        
+        for row_num, row in enumerate(rows, 1):
+            if len(row) < max(table_name_idx, column_name_idx) + 1:
+                logger.warning(f"Row {row_num} has insufficient columns, skipping")
+                continue
+                
+            # Convert all values to strings and handle NaN values
+            row = [str(cell) if pd.notna(cell) else '' for cell in row]
+            
+            table_name = row[table_name_idx].strip()
+            column_name = row[column_name_idx].strip()
+            description = row[description_idx].strip() if description_idx != -1 and len(row) > description_idx else ''
+            business_context = row[business_context_idx].strip() if business_context_idx != -1 and len(row) > business_context_idx else ''
+            exclude_column = row[exclude_column_idx].strip().lower() == 'yes' if exclude_column_idx != -1 and len(row) > exclude_column_idx else False
+            
+            if not table_name or not column_name:
+                logger.warning(f"Row {row_num} has empty table or column name, skipping")
+                continue
+                
+            if table_name not in imported_data:
+                imported_data[table_name] = {}
+            
+            imported_data[table_name][column_name] = {
+                'description': description,
+                'business_context': business_context,
+                'exclude_column': exclude_column
+            }
+            
+            logger.info(f"Row {row_num}: Table='{table_name}', Column='{column_name}', Description='{description}', Business Context='{business_context}', Exclude={exclude_column}")
+            
+            # Debug: Show raw business context value
+            if business_context_idx != -1 and len(row) > business_context_idx:
+                raw_business_context = row[business_context_idx] if business_context_idx < len(row) else 'N/A'
+                logger.info(f"  Raw business context value: '{raw_business_context}' (type: {type(raw_business_context)})")
+                logger.info(f"  Processed business context: '{business_context}' (empty: {not business_context})")
+        
+        logger.info(f"Imported data summary: {len(imported_data)} tables, {sum(len(cols) for cols in imported_data.values())} columns")
+        
+        # Debug: Log all imported data for verification
+        for table_name, columns in imported_data.items():
+            logger.info(f"Imported table '{table_name}' with columns:")
+            for col_name, col_data in columns.items():
+                logger.info(f"  - {col_name}: desc='{col_data['description']}', bc='{col_data['business_context']}', exclude={col_data['exclude_column']}")
+        
+        # Update schema with imported data
+        tables = semantic_schema_data.get('tables', {})
+        updated = False
+        
+        # Debug: Log available tables and columns
+        logger.info(f"Available tables in schema: {list(tables.keys())}")
+        for table_id, table in tables.items():
+            logger.info(f"Table {table_id}: name='{table.get('name')}', display_name='{table.get('display_name')}'")
+            columns = table.get('columns', {})
+            logger.info(f"  Columns: {list(columns.keys())}")
+            for col_id, col in columns.items():
+                logger.info(f"    Column {col_id}: name='{col.get('name')}', display_name='{col.get('display_name')}'")
+                # Check if business_context field exists in schema
+                if 'business_context' in col:
+                    logger.info(f"      business_context exists: '{col.get('business_context')}'")
+                else:
+                    logger.warning(f"      business_context field MISSING from schema for {col_id}")
+        
+        for table_name, columns in imported_data.items():
+            # Find table by name - try multiple matching strategies
+            table_entry = None
+            for table_id, table in tables.items():
+                # Try matching by display_name first, then name, then ID
+                if (table.get('display_name') == table_name or 
+                    table.get('name') == table_name or 
+                    table_id == table_name):
+                    table_entry = (table_id, table)
+                    break
+            
+            if table_entry:
+                table_id, table = table_entry
+                table_columns = table.get('columns', {})
+                
+                # Update columns - try multiple matching strategies
+                for column_name, column_data in columns.items():
+                    column_entry = None
+                    for col_id, col in table_columns.items():
+                        # Try matching by display_name first, then name, then ID
+                        if (col.get('display_name') == column_name or 
+                            col.get('name') == column_name or 
+                            col_id == column_name):
+                            column_entry = (col_id, col)
+                            break
+                    
+                    if column_entry:
+                        col_id, col = column_entry
+                        # Update the column with imported data
+                        col['description'] = column_data['description']
+                        col['business_context'] = column_data['business_context']
+                        col['exclude_column'] = column_data['exclude_column']
+                        updated = True
+                        logger.info(f"Updated column {col_id} in table {table_id} with imported data:")
+                        logger.info(f"  Description: '{column_data['description']}'")
+                        logger.info(f"  Business Context: '{column_data['business_context']}'")
+                        logger.info(f"  Exclude Column: {column_data['exclude_column']}")
+                        
+                        # Verify the field was actually set
+                        logger.info(f"  VERIFICATION - Column {col_id} now has:")
+                        logger.info(f"    description: '{col.get('description')}'")
+                        logger.info(f"    business_context: '{col.get('business_context')}'")
+                        logger.info(f"    exclude_column: {col.get('exclude_column')}")
+                    else:
+                        logger.warning(f"Could not find column '{column_name}' in table '{table_name}'")
+            else:
+                logger.warning(f"Could not find table '{table_name}' in schema")
+        
+        if updated:
+            # Save updated schema
+            updated_schema_json = json.dumps(semantic_schema_data)
+            db.store_semantic_schema(chatbot_id, updated_schema_json)
+            
+            # Debug: Verify what was actually saved
+            logger.info("Verifying saved schema contains business_context fields:")
+            for table_id, table in semantic_schema_data.get('tables', {}).items():
+                for col_id, col in table.get('columns', {}).items():
+                    if col.get('business_context'):
+                        logger.info(f"  {table_id}.{col_id}: business_context='{col.get('business_context')}'")
+                    else:
+                        logger.warning(f"  {table_id}.{col_id}: NO business_context field")
+            
+            # Debug: Check specifically for AdditionalPaymentID
+            payments_table = semantic_schema_data.get('tables', {}).get('Payments', {})
+            if payments_table:
+                additional_payment_col = payments_table.get('columns', {}).get('AdditionalPaymentID', {})
+                logger.info(f"AdditionalPaymentID column details: {additional_payment_col}")
+                if additional_payment_col.get('business_context'):
+                    logger.info(f"AdditionalPaymentID has business_context: '{additional_payment_col.get('business_context')}'")
+                else:
+                    logger.warning("AdditionalPaymentID does NOT have business_context field")
+            
+            # Debug: Check a few random columns to see if business_context is present
+            logger.info("Checking random columns for business_context:")
+            for table_id, table in semantic_schema_data.get('tables', {}).items():
+                columns = table.get('columns', {})
+                sample_cols = list(columns.keys())[:3]  # Check first 3 columns
+                for col_id in sample_cols:
+                    col = columns[col_id]
+                    if col.get('business_context'):
+                        logger.info(f"  {table_id}.{col_id}: business_context='{col.get('business_context')}'")
+                    else:
+                        logger.warning(f"  {table_id}.{col_id}: NO business_context field")
+                break  # Only check first table
+            
+            # Rebuild knowledge cache with updated schema
+            try:
+                from .knowledge_cache_service import build_and_store_knowledge_cache
+                build_and_store_knowledge_cache(chatbot_id)
+            except Exception as cache_error:
+                logger.error(f"Failed to rebuild knowledge cache after schema import for chatbot {chatbot_id}: {cache_error}")
+                # Don't fail the import if cache rebuild fails
+        
+        return {
+            "message": "Semantic schema imported successfully", 
+            "chatbot_id": chatbot_id,
+            "updated_columns": len([col for cols in imported_data.values() for col in cols])
+        }
+        
+    except Exception as import_error:
+        logger.error(f"Failed to import semantic schema for chatbot {chatbot_id}: {str(import_error)}")
+        raise ServiceException(f"Failed to import schema: {str(import_error)}", 500)

@@ -10,6 +10,7 @@ import {
   getChatbotSchema,
   updateKnowledgeBaseSettings,
   previewGlobalTemplate,
+  getDebugInformation,
 
 } from "../services/api";
 import api from "../services/api";
@@ -17,6 +18,7 @@ import { useToaster } from "../Toaster/Toaster";
 import Loader from "./Loader";
 import MultiDatabaseConfig from "./MultiDatabaseConfig";
 import SemanticSchemaEditor from "./SemanticSchemaEditor";
+import { DebugPanel } from "./DebugPanel";
 
 
 interface DatabaseConnection {
@@ -50,6 +52,10 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
   onClose,
   onPromptReady,
 }) => {
+  // Add debug mode toggle button at the top right
+  const toggleDebugPanel = useCallback(() => {
+    setShowDebugPanel(prev => !prev);
+  }, []);
   const [formData, setFormData] = useState({
     name: "",
     aiModel: "",
@@ -96,6 +102,8 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
   const [selected, setSelected] = useState<"create" | "select" | "default" | null>(null);
   const [showFinalPromptPreview, setShowFinalPromptPreview] = useState(false);
   const [finalPromptContent, setFinalPromptContent] = useState<string>("");
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [debugSteps, setDebugSteps] = useState<any[]>([]);
   // Add state for uploaded file at the top of the component
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   // Add state for password visibility
@@ -173,6 +181,18 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
       validateStep(currentStep);
     }
   }, [currentStep]);
+
+  // Handle debug information updates
+  const updateDebugInfo = useCallback(async (conversationId: string, interactionId: string) => {
+    try {
+      const debugData = await getDebugInformation(conversationId, interactionId);
+      if (debugData?.debug?.steps) {
+        setDebugSteps(debugData.debug.steps);
+      }
+    } catch (error) {
+      console.error('Error fetching debug information:', error);
+    }
+  }, []);
 
   // Initialize step 6 validation state when reaching step 6
   useEffect(() => {
@@ -747,6 +767,20 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Debug Panel Toggle Button */}
+        <div className="absolute top-4 right-16">
+          <button
+            onClick={toggleDebugPanel}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg flex items-center space-x-2"
+          >
+            <Brain className="w-4 h-4" />
+            <span>Debug Mode</span>
+          </button>
+        </div>
+
+        {/* Debug Panel */}
+        <DebugPanel steps={debugSteps} isVisible={showDebugPanel} />
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto pt-[96px]">

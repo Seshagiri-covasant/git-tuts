@@ -347,6 +347,13 @@ Output: Return ONLY the minimally corrected SQL text, no commentary or markdown 
             app_db_util = app_db_util or self.app_db_util
             chatbot_db_util = chatbot_db_util or self.chatbot_db_util
 
+            # DEBUG: Print state keys to understand what we're receiving
+            print(f"[Query_Validator] Received state keys: {list(state.keys())}")
+            print(f"[Query_Validator] State.generated_sql exists: {state.get('generated_sql') is not None}")
+            print(f"[Query_Validator] State.sql_query exists: {state.get('sql_query') is not None}")
+            print(f"[Query_Validator] State.sql exists: {state.get('sql') is not None}")
+            print(f"[Query_Validator] Number of messages: {len(state.get('messages', []))}")
+
             # Get the SQL query from the previous node (Query_Generator or Query_Cleaner)
             sql_query = None
             

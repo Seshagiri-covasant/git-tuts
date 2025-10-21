@@ -86,8 +86,24 @@ class QueryCleaner:
         state["messages"][-1] = sql
         state["generated_sql"] = sql
         state["sql_query"] = sql
+        state["sql"] = sql  # Add this for query validator/executor
+        state["query"] = sql  # Add this for query validator/executor
+        state["final_sql"] = sql  # Add this for query validator/executor
+        
         try:
             print(f"[Query_Cleaner] Cleaned SQL: {sql[:1000]}")
+            print(f"[Query_Cleaner] State keys after cleaning: {list(state.keys())}")
+            print(f"[Query_Cleaner] State.generated_sql: {state.get('generated_sql', 'NOT SET')[:100] if state.get('generated_sql') else 'NOT SET'}")
         except Exception:
             pass
-        return state
+        
+        # CRITICAL: Return the updated state properly for LangGraph
+        return {
+            **state,
+            "messages": state["messages"],
+            "generated_sql": sql,
+            "sql_query": sql,
+            "sql": sql,
+            "query": sql,
+            "final_sql": sql
+        }

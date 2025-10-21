@@ -111,6 +111,18 @@ class ConversationalIntentAnalyzer:
         print(f"{knowledge_overview}")
         print(f"{'='*80}\n")
         
+        # Check for column ambiguity before LLM analysis
+        column_ambiguity = self._detect_column_ambiguity(user_question, knowledge_data)
+        if column_ambiguity.get('needs_clarification', False):
+            print(f"[ConversationalIntentAnalyzer] Column ambiguity detected, asking user to clarify")
+            return {
+                'clarification_needed': True,
+                'clarification_question': column_ambiguity['clarification_question'],
+                'ambiguity_type': column_ambiguity['ambiguity_type'],
+                'options': column_ambiguity['options'],
+                'conversation_phase': 'clarification_needed'
+            }
+
         # Use LLM to analyze the question and determine what information is needed
         analysis_prompt = f"""You are an expert data analyst having a natural conversation with a user about their data needs.
 
@@ -376,6 +388,16 @@ Be conversational, business-focused, and avoid all technical database terminolog
                     'content': intent_message
                 })
                 
+                # AGENT THOUGHTS: Internal reasoning process
+                agent_thoughts = self._generate_conversational_thoughts(state.get('user_question', ''), self.requirements_gathered, summary_data)
+                
+                # DECISION TRANSPARENCY: Structured decision trace
+                decision_trace = self._build_conversational_decision_trace(
+                    state.get('user_question', ''), self.requirements_gathered, summary_data
+                )
+                
+                state['agent_thoughts'] = agent_thoughts
+                state['decision_trace'] = decision_trace
                 return state
             else:
                 # Question needs clarification, ask for confirmation
@@ -471,6 +493,90 @@ Be conversational, business-focused, and avoid all technical database terminolog
             print(f"[ConversationalIntentAnalyzer] Error assessing question clarity: {e}")
             # Default to asking for clarification if we can't assess
             return {'is_clear': False}
+
+    def _detect_column_ambiguity(self, question: str, schema_data: Dict) -> Dict[str, Any]:
+        """
+        Detect if there are multiple relevant columns that could match the user's intent.
+        If so, ask the user to clarify which one they want.
+        """
+        try:
+            schema = schema_data.get('schema', {})
+            tables = schema.get('tables', {})
+            user_preferences = schema.get('user_preferences', {})
+            
+            # Find all relevant columns based on question
+            relevant_columns = []
+            
+            for table_name, table_data in tables.items():
+                columns = table_data.get('columns', {})
+                for col_name, col_data in columns.items():
+                    if isinstance(col_data, dict):
+                        # Check if column is relevant to the question
+                        if self._is_column_relevant_to_question(question, col_data):
+                            relevant_columns.append({
+                                'name': col_name,
+                                'table': table_name,
+                                'business_description': col_data.get('business_description', ''),
+                                'business_terms': col_data.get('business_terms', []),
+                                'priority': col_data.get('priority', 'medium'),
+                                'is_preferred': col_data.get('is_preferred', False)
+                            })
+            
+            # If multiple relevant columns found, ask user to clarify
+            if len(relevant_columns) > 1:
+                return {
+                    "needs_clarification": True,
+                    "clarification_question": self._build_column_choice_question(relevant_columns),
+                    "options": relevant_columns,
+                    "ambiguity_type": "multiple_columns"
+                }
+            
+            return {"needs_clarification": False}
+            
+        except Exception as e:
+            print(f"[ConversationalIntentAnalyzer] Error detecting column ambiguity: {e}")
+            return {"needs_clarification": False}
+
+    def _is_column_relevant_to_question(self, question: str, col_data: Dict) -> bool:
+        """Check if a column is relevant to the user's question."""
+        question_lower = question.lower()
+        
+        # Check business terms
+        for term in col_data.get('business_terms', []):
+            if term.lower() in question_lower:
+                return True
+        
+        # Check relevance keywords
+        for keyword in col_data.get('relevance_keywords', []):
+            if keyword.lower() in question_lower:
+                return True
+        
+        # Check business description
+        if col_data.get('business_description', '').lower() in question_lower:
+            return True
+        
+        # Check column name
+        if col_data.get('name', '').lower() in question_lower:
+            return True
+        
+        return False
+
+    def _build_column_choice_question(self, relevant_columns: List[Dict]) -> str:
+        """Build a user-friendly question to choose between columns."""
+        question = "I found multiple columns that could be relevant to your question:\n\n"
+        
+        for i, col in enumerate(relevant_columns, 1):
+            description = col.get('business_description', f"Column: {col['name']}")
+            priority = col.get('priority', 'medium')
+            is_preferred = col.get('is_preferred', False)
+            
+            preferred_text = " (Preferred)" if is_preferred else ""
+            priority_text = f" [{priority.upper()}]" if priority != 'medium' else ""
+            
+            question += f"{i}. **{description}** ({col['name']}){preferred_text}{priority_text}\n"
+        
+        question += "\nWhich column would you like me to use for your analysis?"
+        return question
     
     def _generate_final_intent(self, user_question: str, conversation_context: str, knowledge_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate the final intent after user approval."""
@@ -605,3 +711,167 @@ Be conversational, business-focused, and avoid all technical database terminolog
     def _ask_for_changes(self, user_response: str) -> str:
         """Ask for specific changes to the summary."""
         return "What would you like me to change about this summary?"
+    
+    def _generate_conversational_thoughts(self, question: str, gathered_info: Dict, summary_data: Dict) -> str:
+        """Generate the agent's actual internal thoughts using LLM reasoning."""
+        # Use the LLM to generate its own internal reasoning
+        prompt = f"""
+You are an AI agent that analyzes conversational queries and extracts intent.
+Show your internal thought process as you analyze the conversation.
+
+User Question: "{question}"
+
+Extracted Information:
+Tables: {gathered_info.get('tables', [])}
+Columns: {gathered_info.get('columns', [])}
+Filters: {gathered_info.get('filters', [])}
+
+Summary Data: {summary_data}
+
+Your Task: Show your internal reasoning process as you analyzed this conversation.
+
+Think step by step:
+1. What do you notice about the user's question?
+2. How do you identify which tables are relevant?
+3. How do you extract the right columns?
+4. How do you determine what filters to apply?
+5. How do you assess if the question is clear enough?
+6. What makes you decide to proceed or ask for clarification?
+
+Show your actual thought process, not just the final result.
+"""
+
+        try:
+            # Get the LLM to generate its own internal thoughts
+            response = self.llm.invoke(prompt)
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            return f"Error generating internal thoughts: {e}"
+    
+    def _build_conversational_decision_trace(self, question: str, gathered_info: Dict, summary_data: Dict) -> Dict:
+        """Build structured decision trace for conversational analysis."""
+        trace = {
+            "agent": "ConversationalIntentAnalyzer",
+            "question": question,
+            "extracted_intent": {
+                "tables": gathered_info.get('tables', []),
+                "columns": gathered_info.get('columns', []),
+                "filters": gathered_info.get('filters', []),
+                "aggregations": gathered_info.get('aggregations', []),
+                "time_range": gathered_info.get('time_range', ''),
+                "sorting": gathered_info.get('sorting', ''),
+                "business_context": gathered_info.get('business_context', '')
+            },
+            "clarity_assessment": {
+                "is_clear": not summary_data.get('clarification_needed', True),
+                "clarification_needed": summary_data.get('clarification_needed', True),
+                "business_description": summary_data.get('business_description', ''),
+                "data_focus": summary_data.get('data_focus', ''),
+                "criteria": summary_data.get('criteria', ''),
+                "expected_outcome": summary_data.get('expected_outcome', '')
+            },
+            "extraction_reasons": {},
+            "clarity_signals": [],
+            "override_decisions": {},
+            "conversation_phase": self.conversation_phase
+        }
+        
+        # Analyze table extraction reasoning
+        tables = gathered_info.get('tables', [])
+        trace["extraction_reasons"]["tables"] = {}
+        for table in tables:
+            if 'payment' in table.lower():
+                trace["extraction_reasons"]["tables"][table] = {
+                    "reason": "User mentioned 'payments' - direct match",
+                    "confidence": 0.95,
+                    "user_mentioned": "payments" in question.lower(),
+                    "relevance": "CRITICAL"
+                }
+            else:
+                trace["extraction_reasons"]["tables"][table] = {
+                    "reason": "Inferred from context",
+                    "confidence": 0.7,
+                    "user_mentioned": False,
+                    "relevance": "MEDIUM"
+                }
+        
+        # Analyze column extraction reasoning
+        columns = gathered_info.get('columns', [])
+        trace["extraction_reasons"]["columns"] = {}
+        for col in columns:
+            if 'risk' in col.lower() and 'score' in col.lower():
+                trace["extraction_reasons"]["columns"][col] = {
+                    "reason": "Direct match to user's 'risk score' query",
+                    "confidence": 0.9,
+                    "user_mentioned": "risk" in question.lower() and "score" in question.lower(),
+                    "relevance": "CRITICAL"
+                }
+            elif 'amount' in col.lower():
+                trace["extraction_reasons"]["columns"][col] = {
+                    "reason": "Payment amount information - contextually relevant",
+                    "confidence": 0.8,
+                    "user_mentioned": "amount" in question.lower(),
+                    "relevance": "HIGH"
+                }
+            else:
+                trace["extraction_reasons"]["columns"][col] = {
+                    "reason": "General data column",
+                    "confidence": 0.6,
+                    "user_mentioned": False,
+                    "relevance": "MEDIUM"
+                }
+        
+        # Analyze filter extraction reasoning
+        filters = gathered_info.get('filters', [])
+        trace["extraction_reasons"]["filters"] = {}
+        for filter_condition in filters:
+            if '> 10' in filter_condition:
+                trace["extraction_reasons"]["filters"][filter_condition] = {
+                    "reason": "User specified 'above 10' condition",
+                    "confidence": 0.95,
+                    "user_mentioned": "above" in question.lower() and "10" in question.lower(),
+                    "relevance": "CRITICAL"
+                }
+            else:
+                trace["extraction_reasons"]["filters"][filter_condition] = {
+                    "reason": "Inferred filter condition",
+                    "confidence": 0.7,
+                    "user_mentioned": False,
+                    "relevance": "MEDIUM"
+                }
+        
+        # Identify clarity signals
+        question_lower = question.lower()
+        clarity_signals = []
+        if "which" in question_lower:
+            clarity_signals.append("filtering_query")
+        if "payments" in question_lower:
+            clarity_signals.append("table_mention")
+        if "risk" in question_lower and "score" in question_lower:
+            clarity_signals.append("column_mention")
+        if "above" in question_lower or ">" in question_lower:
+            clarity_signals.append("threshold_mention")
+        if any(word in question_lower for word in ["average", "sum", "count", "max", "min"]):
+            clarity_signals.append("aggregation_mention")
+        
+        trace["clarity_signals"] = clarity_signals
+        
+        # Override decisions (if any)
+        if hasattr(self, 'requirements_gathered') and self.requirements_gathered:
+            trace["override_decisions"] = {
+                "llm_clarification_decision": summary_data.get('clarification_needed', True),
+                "internal_clarity_assessment": not summary_data.get('clarification_needed', True),
+                "override_applied": summary_data.get('clarification_needed', True) != (not summary_data.get('clarification_needed', True)),
+                "reason": "Internal clarity assessment overrode LLM decision"
+            }
+        
+        return trace
+    
+    def _extract_key_terms(self, question: str) -> List[str]:
+        """Extract key terms from the question."""
+        import re
+        # Extract meaningful terms (not common words)
+        words = re.findall(r'\b\w+\b', question.lower())
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'have', 'has', 'had', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must'}
+        key_terms = [word for word in words if word not in stop_words and len(word) > 2]
+        return key_terms

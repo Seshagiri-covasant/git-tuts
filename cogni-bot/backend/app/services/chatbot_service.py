@@ -731,9 +731,7 @@ def update_semantic_schema_service(chatbot_id: str):
             "A 'semantic_schema' object is required in the request body", 400)
 
     # 🔍 LOGGING: Track schema updates
-    print(f"\n{'='*80}")
     print(f"UPDATE SEMANTIC SCHEMA: Updating schema for chatbot {chatbot_id}")
-    print(f"{'='*80}")
     print(f"Schema keys: {list(semantic_schema_data.keys()) if isinstance(semantic_schema_data, dict) else 'Not a dict'}")
     print(f"Tables: {len(semantic_schema_data.get('tables', {}))}")
     print(f"Metrics: {len(semantic_schema_data.get('metrics', []))}")

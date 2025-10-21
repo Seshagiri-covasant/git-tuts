@@ -23,6 +23,13 @@ interface SemanticColumn {
   is_foreign_key: boolean;
   synonyms: SynonymWithSamples[];
   metadata: Record<string, any>;
+  // New column metadata fields for intelligent selection
+  business_description?: string;
+  business_terms?: string[];
+  priority?: 'high' | 'medium' | 'low';
+  is_preferred?: boolean;
+  use_cases?: string[];
+  relevance_keywords?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +49,13 @@ interface SemanticTable {
   metadata: Record<string, any>;
   created_at: string;
   updated_at: string;
+}
+
+interface UserPreferences {
+  risk_score_column?: string;
+  amount_column?: string;
+  date_column?: string;
+  default_risk_threshold?: number;
 }
 
 interface SemanticRelationship {
@@ -384,6 +398,93 @@ const ColumnEditor = React.memo<{
             placeholder="Column alias (e.g., cust_id for customer_id)"
             fieldKey={`${column.id}-alias`}
           />
+          {/* Column Metadata Section */}
+          <div className="border-t pt-3 mt-3">
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Column Metadata for AI Selection</h4>
+            
+            {/* Business Description */}
+            <TextAreaInput
+              defaultValue={column.business_description || ''}
+              onCommit={(value) => onFieldChange('business_description', value)}
+              placeholder="Business-friendly description (e.g., Comprehensive risk assessment combining all risk factors)"
+              rows={2}
+              fieldKey={`${column.id}-business_description`}
+            />
+            
+            {/* Business Terms */}
+            <div className="mb-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Business Terms (comma-separated)</label>
+              <input
+                type="text"
+                defaultValue={(column.business_terms || []).join(', ')}
+                onChange={(e) => {
+                  const terms = e.target.value.split(',').map(term => term.trim()).filter(term => term);
+                  onFieldChange('business_terms', terms);
+                }}
+                placeholder="e.g., overall risk, total risk, comprehensive risk"
+                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            {/* Priority */}
+            <div className="mb-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+              <select
+                value={column.priority || 'medium'}
+                onChange={(e) => onFieldChange('priority', e.target.value)}
+                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            
+            {/* Is Preferred */}
+            <div className="flex items-center space-x-2 mb-2">
+              <input
+                type="checkbox"
+                id={`${column.id}-preferred`}
+                checked={column.is_preferred || false}
+                onChange={(e) => onFieldChange('is_preferred', e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor={`${column.id}-preferred`} className="text-xs text-gray-700">
+                Preferred Column for this type
+              </label>
+            </div>
+            
+            {/* Use Cases */}
+            <div className="mb-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Use Cases (comma-separated)</label>
+              <input
+                type="text"
+                defaultValue={(column.use_cases || []).join(', ')}
+                onChange={(e) => {
+                  const cases = e.target.value.split(',').map(c => c.trim()).filter(c => c);
+                  onFieldChange('use_cases', cases);
+                }}
+                placeholder="e.g., general risk analysis, comprehensive assessment"
+                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            {/* Relevance Keywords */}
+            <div className="mb-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Relevance Keywords (comma-separated)</label>
+              <input
+                type="text"
+                defaultValue={(column.relevance_keywords || []).join(', ')}
+                onChange={(e) => {
+                  const keywords = e.target.value.split(',').map(k => k.trim()).filter(k => k);
+                  onFieldChange('relevance_keywords', keywords);
+                }}
+                placeholder="e.g., risk, score, assessment, overall"
+                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+          
           {/* Exclude Column checkbox */}
           <div className="flex items-center space-x-2">
             <input
@@ -848,6 +949,24 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
+  
+  // Column metadata state
+  const [columnMetadata, setColumnMetadata] = useState({
+    business_description: '',
+    business_terms: [] as string[],
+    priority: 'medium' as 'high' | 'medium' | 'low',
+    is_preferred: false,
+    use_cases: [] as string[],
+    relevance_keywords: [] as string[]
+  });
+  
+  // User preferences state
+  const [userPreferences, setUserPreferences] = useState<UserPreferences>({
+    risk_score_column: '',
+    amount_column: '',
+    date_column: '',
+    default_risk_threshold: 10
+  });
   const [selectedTable, setSelectedTable] = useState<SemanticTable | null>(null);
   const [currentInspectorIndex, setCurrentInspectorIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<'details' | 'columns' | 'relationships'>('details');
@@ -858,6 +977,7 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [showMetricsDialog, setShowMetricsDialog] = useState(false);
+  const [showUserPreferencesDialog, setShowUserPreferencesDialog] = useState(false);
   // Preserve scroll position in inspector panel when toggling edit
   const inspectorScrollRef = React.useRef<HTMLDivElement | null>(null);
   // Relationship filtering state (used by relationship inspector)
@@ -1491,18 +1611,18 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
 
   // Save functions
   const handleSaveSchema = async () => {
-    console.log('🔍 Save button clicked!');
+    console.log(' Save button clicked!');
     console.log('Schema:', schema);
     console.log('Saving state:', saving);
     
     if (!schema) {
-      console.log('❌ No schema to save');
+      console.log(' No schema to save');
       showToast('No schema to save', 'error');
       return;
     }
     
     try {
-      console.log('🔄 Starting save process...');
+      console.log(' Starting save process...');
       setSaving(true);
       
       // Validate schema before saving
@@ -2339,6 +2459,13 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
             >
               <Calculator className="w-4 h-4 mr-2 text-green-600" />
               <span className="text-green-600 font-medium">Metrics</span>
+            </button>
+            <button
+              onClick={() => setShowUserPreferencesDialog(true)}
+              className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px]"
+            >
+              <Edit3 className="w-4 h-4 mr-2 text-blue-600" />
+              <span className="text-blue-600 font-medium">AI Preferences</span>
             </button>
             <button
               onClick={() => {
@@ -3463,6 +3590,125 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
         </div>
       )}
       
+      {/* User Preferences Dialog */}
+      {showUserPreferencesDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">User Preferences for AI Column Selection</h3>
+              
+              <div className="space-y-4">
+                {/* Risk Score Column Preference */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Risk Score Column</label>
+                  <select
+                    value={userPreferences.risk_score_column || ''}
+                    onChange={(e) => setUserPreferences({
+                      ...userPreferences,
+                      risk_score_column: e.target.value
+                    })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select Column</option>
+                    {Object.values(schema?.tables || {}).flatMap(table => 
+                      Object.values(table.columns || {}).map(col => (
+                        <option key={col.id} value={col.name}>
+                          {col.name} ({table.name})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                
+                {/* Amount Column Preference */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Amount Column</label>
+                  <select
+                    value={userPreferences.amount_column || ''}
+                    onChange={(e) => setUserPreferences({
+                      ...userPreferences,
+                      amount_column: e.target.value
+                    })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select Column</option>
+                    {Object.values(schema?.tables || {}).flatMap(table => 
+                      Object.values(table.columns || {}).map(col => (
+                        <option key={col.id} value={col.name}>
+                          {col.name} ({table.name})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                
+                {/* Date Column Preference */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Date Column</label>
+                  <select
+                    value={userPreferences.date_column || ''}
+                    onChange={(e) => setUserPreferences({
+                      ...userPreferences,
+                      date_column: e.target.value
+                    })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select Column</option>
+                    {Object.values(schema?.tables || {}).flatMap(table => 
+                      Object.values(table.columns || {}).map(col => (
+                        <option key={col.id} value={col.name}>
+                          {col.name} ({table.name})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                
+                {/* Default Risk Threshold */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Default Risk Threshold</label>
+                  <input
+                    type="number"
+                    value={userPreferences.default_risk_threshold || 10}
+                    onChange={(e) => setUserPreferences({
+                      ...userPreferences,
+                      default_risk_threshold: parseInt(e.target.value) || 10
+                    })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="10"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-gray-200 bg-gray-50">
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowUserPreferencesDialog(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    // Save user preferences to schema
+                    const updatedSchema = {
+                      ...schema,
+                      user_preferences: userPreferences
+                    };
+                    setSchema(updatedSchema);
+                    setShowUserPreferencesDialog(false);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Save Preferences
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hidden file input for import */}
       <input
         id="import-schema-input"

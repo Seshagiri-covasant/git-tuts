@@ -3,7 +3,7 @@ from typing import Optional, Dict, List, Any
 from langchain_core.messages import SystemMessage
 from langchain_core.language_models import BaseLanguageModel
 from app.repositories.chatbot_db_util import ChatbotDbUtil
-# from .conversation_aware_domain_checker import ConversationAwareDomainChecker  # Deleted agent
+from .conversation_aware_domain_checker import ConversationAwareDomainChecker
 
 
 class DomainRelevanceCheckerAgent:
@@ -27,7 +27,32 @@ class DomainRelevanceCheckerAgent:
         except Exception as e:
             print(f"[Domain_Relevance_Checker] Error extracting domain: {e}")
             return "general"
-
+    
+    def _basic_domain_check(self, question: str, semantic_schema: dict) -> dict:
+        """Basic domain checking fallback when conversation-aware checker is disabled."""
+        try:
+            # Simple domain relevance check
+            domain_keywords = semantic_schema.get('domain_keywords', [])
+            question_lower = question.lower()
+            
+            # Check if question contains domain-relevant keywords
+            is_relevant = any(keyword.lower() in question_lower for keyword in domain_keywords)
+            
+            return {
+                "is_relevant": is_relevant,
+                "confidence": 0.8 if is_relevant else 0.3,
+                "reasoning": "Basic domain check - conversation-aware checker disabled",
+                "is_follow_up": False
+            }
+        except Exception as e:
+            print(f"[Domain_Relevance_Checker] Error in basic domain check: {e}")
+            return {
+                "is_relevant": True,  # Default to relevant if check fails
+                "confidence": 0.5,
+                "reasoning": "Basic domain check failed, defaulting to relevant",
+                "is_follow_up": False
+            }
+    
     def _infer_domain_with_llm(self, semantic_schema: dict) -> str:
         """Use the LLM to intelligently infer the business domain from the schema context."""
         try:

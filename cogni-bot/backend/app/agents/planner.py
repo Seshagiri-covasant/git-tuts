@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import TypedDict, List, Dict, Any
-# Removed imports for deleted agents - using alternatives
+from .domain_error_response import DomainErrorResponseAgent
 
 class CustomState(TypedDict):
     messages: List[Any]
@@ -16,6 +16,13 @@ class CustomState(TypedDict):
     conversation_phase: str
     summary: str
     error: str
+    # SQL-related fields
+    generated_sql: str
+    sql_query: str
+    sql: str
+    query: str
+    final_sql: str
+    forbidden_sql: bool
 
 
 class Planner:
@@ -26,14 +33,13 @@ class Planner:
         self.chatbot_id = chatbot_id
         self.workflow = StateGraph(CustomState)
         
-        # Use existing query_clarification instead of deleted agents
-        # domain_error_response = DomainErrorResponseAgent()  # Deleted
-        # enhanced_clarification = EnhancedQueryClarification(...)  # Deleted
+        # Create domain error response agent
+        domain_error_response = DomainErrorResponseAgent()
         
         # Pass db utils to nodes if needed
         self.workflow.add_node("Domain_Relevance_Checker", lambda state: domain_relevance_checker.run(
             state, chatbot_id=self.chatbot_id, chatbot_db_util=self.chatbot_db_util))
-        # self.workflow.add_node("Domain_Error_Response", domain_error_response.run)  # Deleted agent
+        self.workflow.add_node("Domain_Error_Response", domain_error_response.run)
         self.workflow.add_node("Intent_Picker", lambda state: intent_picker.run(state))
         self.workflow.add_node("Conversational_Intent_Analyzer", lambda state: self._run_conversational_intent_analyzer(state, conversational_intent_analyzer))
         self.workflow.add_node("Query_Clarification", lambda state: query_clarification.run(state))  # Use existing query_clarification
@@ -73,7 +79,7 @@ class Planner:
 
         self.workflow.add_edge(START, "Domain_Relevance_Checker")
         self.workflow.add_conditional_edges("Domain_Relevance_Checker", route_after_domain_check)
-        # self.workflow.add_edge("Domain_Error_Response", END)  # Deleted agent
+        self.workflow.add_edge("Domain_Error_Response", END)
         self.workflow.add_conditional_edges("Intent_Picker", route_after_intent)
         self.workflow.add_conditional_edges("Conversational_Intent_Analyzer", route_after_conversational_intent)
         self.workflow.add_conditional_edges("Query_Clarification", route_after_query_clarification)

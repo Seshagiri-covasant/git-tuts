@@ -14,7 +14,7 @@ from .query_executor import QueryExecutor
 from .answer_rephraser import AnswerRephraser
 from .domain_relevance_checker import DomainRelevanceCheckerAgent
 from .conversational_intent_analyzer import ConversationalIntentAnalyzer
-# from .conversational_memory_manager import ConversationalMemoryManager  # Deleted agent
+from .conversational_memory_manager import ConversationalMemoryManager
 from .planner import Planner
 from .llm_factory import get_llm
 from .ba_reporter import generate_llm_ba_summary
@@ -40,8 +40,7 @@ class AgentManager:
         self.chatbot_id = chatbot_id
         
         # Initialize conversational memory manager
-        # self.memory_manager = ConversationalMemoryManager(chatbot_db_util, chatbot_id)  # Deleted agent
-        self.memory_manager = None  # Disabled memory manager
+        self.memory_manager = ConversationalMemoryManager(chatbot_db_util, chatbot_id)
         
         # Initialize conversational integration for enhanced flow (lazy import)
         self.conversational_integration = None
@@ -154,9 +153,8 @@ class AgentManager:
                 return
             
             # Load conversation history using memory manager
-            # conversation_history = self.memory_manager.load_conversation_history(conv_id)  # Disabled
-            # self.memory_manager.update_conversation_memory(conversation_history)  # Disabled
-            conversation_history = []  # Fallback to empty history
+            conversation_history = self.memory_manager.load_conversation_history(conv_id)
+            self.memory_manager.update_conversation_memory(conversation_history)
             
             # Also update the legacy memory for backward compatibility
             self.memory.clear()
@@ -237,9 +235,7 @@ class AgentManager:
         schema_info = self._load_schema_info()
         
         # COMPREHENSIVE LOGGING: Schema data sent to LLM
-        print(f"\n{'='*80}")
         print(f"AGENT DEBUG: Schema data being sent to LLM")
-        print(f"{'='*80}")
         print(f"Schema Info Keys: {list(schema_info.keys()) if schema_info else 'None'}")
             
         if schema_info and 'schema' in schema_info:
@@ -531,11 +527,38 @@ class AgentManager:
         # Add the final result to memory for future conversations
         self.memory.chat_memory.add_ai_message(final_result)
 
+        # Collect and display agent thoughts
+        agent_thoughts = self._collect_agent_thoughts(results)
+        if agent_thoughts:
+            print(f"\n{'='*80}")
+            print(f"🧠 AGENT THOUGHTS SUMMARY")
+            print(f"{'='*80}")
+            print(agent_thoughts)
+            print(f"{'='*80}\n")
+
+        # Collect decision traces
+        decision_traces = self._collect_decision_traces(results)
+        if decision_traces:
+            print(f"\n{'='*80}")
+            print(f"🔍 DECISION TRANSPARENCY TRACES")
+            print(f"{'='*80}")
+            for trace in decision_traces:
+                print(f"\n--- {trace.get('agent', 'Unknown')} DECISION TRACE ---")
+                print(f"Question: {trace.get('question', 'N/A')}")
+                print(f"Tables Selected: {trace.get('tables_selected', trace.get('extracted_intent', {}).get('tables', []))}")
+                print(f"Columns Selected: {trace.get('columns_selected', trace.get('extracted_intent', {}).get('columns', []))}")
+                print(f"Filters Built: {trace.get('filters_built', trace.get('extracted_intent', {}).get('filters', []))}")
+                print(f"Confidence Scores: {trace.get('confidence_scores', {})}")
+                print(f"Signals Used: {trace.get('signals_used', trace.get('clarity_signals', []))}")
+            print(f"{'='*80}\n")
+
         return {
             "final_result": final_result,
             "cleaned_query": final_sql,
             "raw_result_set": raw_result_set,
             "ba_summary": ba_summary,
+            "agent_thoughts": agent_thoughts,
+            "decision_traces": decision_traces,
             "debug": {
                 "steps": debug_steps
             }
@@ -584,10 +607,45 @@ class AgentManager:
                 return []
             
             # Load conversation history using memory manager
-            # conversation_history = self.memory_manager.load_conversation_history(conversation_id)  # Disabled
-            conversation_history = []  # Fallback to empty history
+            conversation_history = self.memory_manager.load_conversation_history(conversation_id)
             return conversation_history
             
         except Exception as e:
             self.logger.error(f"Error getting conversation history: {e}")
             return []
+    
+    def _collect_agent_thoughts(self, results: List[Dict]) -> str:
+        """Collect and format agent thoughts from workflow results."""
+        thoughts = []
+        
+        # Look for agent_thoughts in each step's result
+        for step in results:
+            step_name = step.get("step", "")
+            step_result = step.get("result", {})
+            
+            # Check if this step has agent thoughts
+            if isinstance(step_result, dict) and "agent_thoughts" in step_result:
+                agent_thoughts = step_result["agent_thoughts"]
+                if agent_thoughts:
+                    thoughts.append(f"\n--- {step_name} THOUGHTS ---")
+                    thoughts.append(agent_thoughts)
+                    thoughts.append("")
+        
+        return "\n".join(thoughts) if thoughts else ""
+    
+    def _collect_decision_traces(self, results: List[Dict]) -> List[Dict]:
+        """Collect structured decision traces from workflow results."""
+        traces = []
+        
+        # Look for decision_trace in each step's result
+        for step in results:
+            step_name = step.get("step", "")
+            step_result = step.get("result", {})
+            
+            # Check if this step has decision trace
+            if isinstance(step_result, dict) and "decision_trace" in step_result:
+                decision_trace = step_result["decision_trace"]
+                if decision_trace:
+                    traces.append(decision_trace)
+        
+        return traces

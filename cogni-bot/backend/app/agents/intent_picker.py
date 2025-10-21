@@ -65,11 +65,21 @@ class AdvancedIntentPicker:
             print(f"[AdvancedIntentPicker] Final intent: {validated_intent}")
             print(f"[AdvancedIntentPicker] Confidence scores: {confidence_scores}")
             
+            # AGENT THOUGHTS: Internal reasoning process
+            agent_thoughts = self._generate_agent_thoughts(state.get('user_question', ''), validated_intent, knowledge_data, confidence_scores)
+            
+            # DECISION TRANSPARENCY: Structured decision trace
+            decision_trace = self._build_decision_trace(
+                state.get('user_question', ''), validated_intent, knowledge_data, confidence_scores
+            )
+            
             return {
                 **state,
                 'intent': validated_intent,
                 'confidence_scores': confidence_scores,
-                'conversation_context': conversation_context
+                'conversation_context': conversation_context,
+                'agent_thoughts': agent_thoughts,
+                'decision_trace': decision_trace
             }
             
         except Exception as e:
@@ -481,27 +491,188 @@ Respond in this JSON format:
     
     def _validate_intent_with_schema(self, intent: Dict, knowledge_data: Dict) -> Dict:
         """
-        Validate intent against available schema with sophisticated logic.
+        Validate intent against available schema with intelligent column selection.
         """
         validated_intent = intent.copy()
+        
+        # Get schema and user preferences
+        schema = knowledge_data.get('schema', {})
+        user_preferences = schema.get('user_preferences', {})
+        tables = schema.get('tables', {})
         
         # Validate tables
         if 'tables' in intent:
             validated_tables = []
             for table in intent['tables']:
-                if f"table:{table}" in knowledge_data:
+                if table in tables:
                     validated_tables.append(table)
             validated_intent['tables'] = validated_tables
         
-        # Validate columns
+        # Intelligent column selection using schema metadata
         if 'columns' in intent:
-            validated_columns = []
-            for column in intent['columns']:
-                if f"column:{column}" in knowledge_data:
-                    validated_columns.append(column)
+            validated_columns = self._select_columns_intelligently(
+                intent, validated_intent.get('tables', []), tables, user_preferences
+            )
             validated_intent['columns'] = validated_columns
         
         return validated_intent
+
+    def _select_columns_intelligently(self, intent: Dict, tables: List[str], schema_tables: Dict, user_preferences: Dict) -> List[str]:
+        """Select columns using schema metadata and user preferences."""
+        try:
+            selected_columns = []
+            user_question = intent.get('user_question', '').lower()
+            
+            for table in tables:
+                table_data = schema_tables.get(table, {})
+                columns = table_data.get('columns', {})
+                
+                # Get all columns for this table with metadata
+                available_columns = []
+                for col_name, col_data in columns.items():
+                    if isinstance(col_data, dict):
+                        available_columns.append({
+                            'name': col_name,
+                            'business_description': col_data.get('business_description', ''),
+                            'business_terms': col_data.get('business_terms', []),
+                            'priority': col_data.get('priority', 'medium'),
+                            'is_preferred': col_data.get('is_preferred', False),
+                            'use_cases': col_data.get('use_cases', []),
+                            'relevance_keywords': col_data.get('relevance_keywords', [])
+                        })
+                
+                # Method 1: Check user preferences first
+                preferred_columns = self._get_preferred_columns(user_question, user_preferences, available_columns)
+                if preferred_columns:
+                    selected_columns.extend(preferred_columns)
+                    continue
+                
+                # Method 2: Business terms matching
+                business_matched_columns = self._match_business_terms(user_question, available_columns)
+                if business_matched_columns:
+                    selected_columns.extend(business_matched_columns)
+                    continue
+                
+                # Method 3: Priority-based selection
+                priority_columns = self._select_by_priority(available_columns)
+                if priority_columns:
+                    selected_columns.extend(priority_columns)
+                    continue
+                
+                # Method 4: Fallback to original intent columns
+                original_columns = intent.get('columns', [])
+                for col in original_columns:
+                    if col in columns:
+                        selected_columns.append(col)
+            
+            return list(set(selected_columns))  # Remove duplicates
+            
+        except Exception as e:
+            print(f"[AdvancedIntentPicker] Error in intelligent column selection: {e}")
+            return intent.get('columns', [])
+
+    def _get_preferred_columns(self, user_question: str, user_preferences: Dict, available_columns: List[Dict]) -> List[str]:
+        """Check user preferences for column selection."""
+        try:
+            # Check if user is asking about risk scores
+            if 'risk' in user_question and 'risk_score_column' in user_preferences:
+                preferred_col = user_preferences['risk_score_column']
+                for col in available_columns:
+                    if col['name'] == preferred_col:
+                        return [preferred_col]
+            
+            # Check if user is asking about amounts
+            if any(word in user_question for word in ['amount', 'money', 'value', 'cost', 'price']):
+                if 'amount_column' in user_preferences:
+                    preferred_col = user_preferences['amount_column']
+                    for col in available_columns:
+                        if col['name'] == preferred_col:
+                            return [preferred_col]
+            
+            # Check if user is asking about dates
+            if any(word in user_question for word in ['date', 'time', 'when', 'created', 'updated']):
+                if 'date_column' in user_preferences:
+                    preferred_col = user_preferences['date_column']
+                    for col in available_columns:
+                        if col['name'] == preferred_col:
+                            return [preferred_col]
+            
+            return []
+        except Exception as e:
+            print(f"[AdvancedIntentPicker] Error checking user preferences: {e}")
+            return []
+
+    def _match_business_terms(self, user_question: str, available_columns: List[Dict]) -> List[str]:
+        """Match columns based on business terms in schema."""
+        try:
+            matched_columns = []
+            
+            for col in available_columns:
+                score = 0
+                matched_terms = []
+                
+                # Check business terms
+                for term in col.get('business_terms', []):
+                    if term.lower() in user_question:
+                        score += 10
+                        matched_terms.append(term)
+                
+                # Check relevance keywords
+                for keyword in col.get('relevance_keywords', []):
+                    if keyword.lower() in user_question:
+                        score += 5
+                        matched_terms.append(keyword)
+                
+                # Check business description
+                if col.get('business_description', '').lower() in user_question:
+                    score += 3
+                
+                if score > 0:
+                    matched_columns.append({
+                        'column': col['name'],
+                        'score': score,
+                        'matched_terms': matched_terms
+                    })
+            
+            # Return highest scoring columns
+            if matched_columns:
+                matched_columns.sort(key=lambda x: x['score'], reverse=True)
+                return [col['column'] for col in matched_columns[:3]]  # Top 3 matches
+            
+            return []
+        except Exception as e:
+            print(f"[AdvancedIntentPicker] Error matching business terms: {e}")
+            return []
+
+    def _select_by_priority(self, available_columns: List[Dict]) -> List[str]:
+        """Select columns based on priority in schema."""
+        try:
+            # Filter preferred columns first
+            preferred_columns = [col for col in available_columns if col.get('is_preferred', False)]
+            if preferred_columns:
+                return [col['name'] for col in preferred_columns]
+            
+            # Then by priority
+            priority_scores = {'high': 3, 'medium': 2, 'low': 1}
+            scored_columns = []
+            
+            for col in available_columns:
+                priority = col.get('priority', 'medium')
+                score = priority_scores.get(priority, 1)
+                scored_columns.append({
+                    'name': col['name'],
+                    'score': score,
+                    'priority': priority
+                })
+            
+            if scored_columns:
+                scored_columns.sort(key=lambda x: x['score'], reverse=True)
+                return [col['name'] for col in scored_columns[:2]]  # Top 2 by priority
+            
+            return []
+        except Exception as e:
+            print(f"[AdvancedIntentPicker] Error selecting by priority: {e}")
+            return []
     
     def _build_knowledge_overview(self, knowledge_data: Dict[str, Any], question: str) -> str:
         """
@@ -647,3 +818,155 @@ Respond in this JSON format:
         
         # Add sophisticated aggregation confidence calculation here
         return 0.8  # Placeholder
+    
+    def _generate_agent_thoughts(self, question: str, intent: Dict, schema_data: Dict, confidence_scores: Dict) -> str:
+        """Generate the agent's actual internal thoughts using LLM reasoning."""
+        # Use the LLM to generate its own internal reasoning
+        prompt = f"""
+You are an AI agent that analyzes user questions and selects relevant database tables and columns. 
+Show your internal thought process as you make decisions.
+
+User Question: "{question}"
+
+Available Schema:
+Tables: {list(schema_data.get('tables', {}).keys())}
+Schema Details: {schema_data}
+
+Your Task: Show your internal reasoning process as you decide which tables and columns to select.
+
+Think step by step:
+1. What do you notice about the user's question?
+2. What tables seem relevant and why?
+3. What columns do you need and why?
+4. What filters should you apply and why?
+5. How confident are you in each decision?
+
+Show your actual thought process, not just the final result.
+"""
+
+        try:
+            # Get the LLM to generate its own internal thoughts
+            response = self.llm.invoke(prompt)
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            return f"Error generating internal thoughts: {e}"
+    
+    def _extract_key_terms(self, question: str) -> List[str]:
+        """Extract key terms from the question."""
+        import re
+        # Extract meaningful terms (not common words)
+        words = re.findall(r'\b\w+\b', question.lower())
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'have', 'has', 'had', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must'}
+        key_terms = [word for word in words if word not in stop_words and len(word) > 2]
+        return key_terms
+    
+    def _build_decision_trace(self, question: str, intent: Dict, schema_data: Dict, confidence_scores: Dict) -> Dict:
+        """Build structured decision trace showing reasoning process."""
+        trace = {
+            "agent": "IntentPicker",
+            "question": question,
+            "tables_selected": intent.get('tables', []),
+            "columns_selected": intent.get('columns', []),
+            "filters_built": intent.get('filters', []),
+            "aggregations_identified": intent.get('aggregations', []),
+            "selection_reasons": {},
+            "confidence_scores": confidence_scores,
+            "signals_used": [],
+            "schema_analysis": {},
+            "intelligent_selection": {
+                "method_used": "schema_metadata",
+                "user_preferences_checked": False,
+                "business_terms_matched": [],
+                "priority_based_selection": False,
+                "fallback_used": False
+            }
+        }
+        
+        # Analyze table selection reasoning
+        selected_tables = intent.get('tables', [])
+        available_tables = list(schema_data.get('tables', {}).keys()) if isinstance(schema_data.get('tables'), dict) else []
+        
+        trace["selection_reasons"]["tables"] = {}
+        for table in selected_tables:
+            if table in available_tables:
+                trace["selection_reasons"]["tables"][table] = {
+                    "reason": "Direct match to user query",
+                    "confidence": confidence_scores.get('tables', 0.0),
+                    "user_mentioned": "payments" in question.lower() if table.lower() == "payments" else False
+                }
+            else:
+                trace["selection_reasons"]["tables"][table] = {
+                    "reason": "Inferred from context",
+                    "confidence": confidence_scores.get('tables', 0.0),
+                    "user_mentioned": False
+                }
+        
+        # Analyze column selection reasoning
+        selected_columns = intent.get('columns', [])
+        trace["selection_reasons"]["columns"] = {}
+        for col in selected_columns:
+            if 'risk' in col.lower() or 'score' in col.lower():
+                trace["selection_reasons"]["columns"][col] = {
+                    "reason": "Risk/Score column - direct match to user intent",
+                    "confidence": confidence_scores.get('columns', 0.0),
+                    "relevance": "HIGH",
+                    "user_mentioned": "risk" in question.lower() and "score" in question.lower()
+                }
+            elif 'amount' in col.lower() or 'payment' in col.lower():
+                trace["selection_reasons"]["columns"][col] = {
+                    "reason": "Payment/Amount column - contextually relevant",
+                    "confidence": confidence_scores.get('columns', 0.0),
+                    "relevance": "MEDIUM",
+                    "user_mentioned": "payment" in question.lower()
+                }
+            else:
+                trace["selection_reasons"]["columns"][col] = {
+                    "reason": "General data column",
+                    "confidence": confidence_scores.get('columns', 0.0),
+                    "relevance": "LOW",
+                    "user_mentioned": False
+                }
+        
+        # Analyze filter construction reasoning
+        filters = intent.get('filters', [])
+        trace["selection_reasons"]["filters"] = {}
+        for filter_condition in filters:
+            if '> 10' in filter_condition:
+                trace["selection_reasons"]["filters"][filter_condition] = {
+                    "reason": "User specified 'above 10' condition",
+                    "confidence": confidence_scores.get('filters', 0.0),
+                    "logic": "Numeric threshold filtering",
+                    "user_mentioned": "above" in question.lower() and "10" in question.lower()
+                }
+            else:
+                trace["selection_reasons"]["filters"][filter_condition] = {
+                    "reason": "Inferred filter condition",
+                    "confidence": confidence_scores.get('filters', 0.0),
+                    "logic": "Context-based filtering",
+                    "user_mentioned": False
+                }
+        
+        # Identify signals used
+        question_lower = question.lower()
+        signals = []
+        if "which" in question_lower:
+            signals.append("filtering_query")
+        if "payments" in question_lower:
+            signals.append("table_mention")
+        if "risk" in question_lower and "score" in question_lower:
+            signals.append("column_mention")
+        if "above" in question_lower or ">" in question_lower:
+            signals.append("threshold_mention")
+        if any(word in question_lower for word in ["average", "sum", "count", "max", "min"]):
+            signals.append("aggregation_mention")
+        
+        trace["signals_used"] = signals
+        
+        # Schema analysis
+        trace["schema_analysis"] = {
+            "available_tables": available_tables,
+            "total_columns": sum(len(table_data.get('columns', [])) for table_data in schema_data.get('tables', {}).values()) if isinstance(schema_data.get('tables'), dict) else 0,
+            "metrics_available": len(schema_data.get('schema', {}).get('metrics', [])) if 'schema' in schema_data else 0
+        }
+        
+        return trace

@@ -4,6 +4,7 @@ import { Search, RefreshCw, Plus, Check, Square, X, ChevronRight, Maximize2, Min
 import { getSemanticSchema, updateSemanticSchema, exportSemanticSchema, importSemanticSchema } from '../services/api';
 import { useToaster } from '../Toaster/Toaster';
 import Loader from './Loader';
+import AggregationPatternsDialog from './AggregationPatternsDialog';
 
 // Types
 interface SynonymWithSamples {
@@ -56,6 +57,16 @@ interface UserPreferences {
   amount_column?: string;
   date_column?: string;
   default_risk_threshold?: number;
+}
+
+interface AggregationPattern {
+  id: string;
+  name: string;
+  description: string;
+  sql_template: string;
+  keywords: string[];
+  example_question: string;
+  example_sql: string;
 }
 
 interface SemanticRelationship {
@@ -950,15 +961,6 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const [saving, setSaving] = useState(false);
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   
-  // Column metadata state
-  const [columnMetadata, setColumnMetadata] = useState({
-    business_description: '',
-    business_terms: [] as string[],
-    priority: 'medium' as 'high' | 'medium' | 'low',
-    is_preferred: false,
-    use_cases: [] as string[],
-    relevance_keywords: [] as string[]
-  });
   
   // User preferences state
   const [userPreferences, setUserPreferences] = useState<UserPreferences>({
@@ -967,6 +969,8 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
     date_column: '',
     default_risk_threshold: 10
   });
+  const [aggregationPatterns, setAggregationPatterns] = useState<AggregationPattern[]>([]);
+  const [showAggregationDialog, setShowAggregationDialog] = useState(false);
   const [selectedTable, setSelectedTable] = useState<SemanticTable | null>(null);
   const [currentInspectorIndex, setCurrentInspectorIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<'details' | 'columns' | 'relationships'>('details');
@@ -1401,6 +1405,12 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
       })();
 
       setSchema(normalized);
+      
+      // Load aggregation patterns from schema
+      if (incoming.aggregation_patterns) {
+        setAggregationPatterns(incoming.aggregation_patterns);
+        console.log('Loaded aggregation patterns:', incoming.aggregation_patterns);
+      }
       
       const tables = (normalized as any).tables;
       const tableNames = Object.keys(tables);
@@ -1865,6 +1875,8 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
         name: sanitizedSchema.name,
         // Database-level metrics (normalized to objects)
         metrics: dbMetrics,
+        // Aggregation patterns for SQL generation
+        aggregation_patterns: aggregationPatterns,
         synonyms: rolledSynonyms, // Include rolled up synonyms
         metadata: {
           ...(sanitizedSchema.metadata || {}),
@@ -2466,6 +2478,13 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
             >
               <Edit3 className="w-4 h-4 mr-2 text-blue-600" />
               <span className="text-blue-600 font-medium">AI Preferences</span>
+            </button>
+            <button
+              onClick={() => setShowAggregationDialog(true)}
+              className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px]"
+            >
+              <Calculator className="w-4 h-4 mr-2 text-green-600" />
+              <span className="text-green-600 font-medium">Aggregation Patterns</span>
             </button>
             <button
               onClick={() => {
@@ -3708,6 +3727,18 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
           </div>
         </div>
       )}
+
+      {/* Aggregation Patterns Dialog */}
+      <AggregationPatternsDialog
+        isOpen={showAggregationDialog}
+        onClose={() => setShowAggregationDialog(false)}
+        patterns={aggregationPatterns}
+        onSave={(patterns) => {
+          setAggregationPatterns(patterns);
+          console.log('Saving aggregation patterns:', patterns);
+          // Patterns are now saved to state and will be included in schema save
+        }}
+      />
 
       {/* Hidden file input for import */}
       <input

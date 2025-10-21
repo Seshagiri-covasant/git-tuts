@@ -58,6 +58,8 @@ class ConversationalIntentAnalyzer:
                 return self._handle_summary_response(user_question, conversation_context, knowledge_data)
             elif self.conversation_phase == "approved":
                 return self._generate_final_intent(user_question, conversation_context, knowledge_data)
+            elif self.conversation_phase == "human_clarification":
+                return self._handle_human_clarification_response(user_question, conversation_context, knowledge_data)
             else:
                 return self._handle_initial_question(user_question, conversation_context, knowledge_data)
                 
@@ -111,17 +113,23 @@ class ConversationalIntentAnalyzer:
         print(f"{knowledge_overview}")
         print(f"{'='*80}\n")
         
-        # Check for column ambiguity before LLM analysis
+        # Check for column ambiguity before LLM analysis (only for very ambiguous cases)
         column_ambiguity = self._detect_column_ambiguity(user_question, knowledge_data)
+        print(f"[ConversationalIntentAnalyzer] Column ambiguity check: needs_clarification={column_ambiguity.get('needs_clarification', False)}, options_count={len(column_ambiguity.get('options', []))}")
+        
         if column_ambiguity.get('needs_clarification', False):
-            print(f"[ConversationalIntentAnalyzer] Column ambiguity detected, asking user to clarify")
-            return {
-                'clarification_needed': True,
-                'clarification_question': column_ambiguity['clarification_question'],
-                'ambiguity_type': column_ambiguity['ambiguity_type'],
-                'options': column_ambiguity['options'],
-                'conversation_phase': 'clarification_needed'
-            }
+            # Ask for clarification if there are 2+ relevant columns (any ambiguity)
+            if len(column_ambiguity.get('options', [])) >= 2:
+                print(f"[ConversationalIntentAnalyzer] Column ambiguity detected with {len(column_ambiguity.get('options', []))} options, asking user to clarify")
+                return {
+                    'clarification_needed': True,
+                    'clarification_question': column_ambiguity['clarification_question'],
+                    'ambiguity_type': column_ambiguity['ambiguity_type'],
+                    'options': column_ambiguity['options'],
+                    'conversation_phase': 'clarification_needed'
+                }
+            else:
+                print(f"[ConversationalIntentAnalyzer] Column ambiguity detected but only {len(column_ambiguity.get('options', []))} options, proceeding with intelligent selection")
 
         # Use LLM to analyze the question and determine what information is needed
         analysis_prompt = f"""You are an expert data analyst having a natural conversation with a user about their data needs.
@@ -144,6 +152,19 @@ IMPORTANT:
 - Use ONLY the exact names provided in the "Available Database Metrics" section
 
 ALWAYS copy the exact metric name from the "Available Database Metrics" section.
+
+INTELLIGENT BUSINESS ANALYSIS:
+- For questions asking about "high" or "low" values, assume they mean above/below average
+- For percentage questions, you can calculate percentages using COUNT and GROUP BY
+- For comparison questions (vs, versus, by), use appropriate grouping columns
+- For complex aggregations, include both the base columns and aggregation functions needed
+- Don't ask for clarification on obvious business analysis questions
+
+AGGREGATION REQUIREMENTS:
+- When user asks for percentages, include: COUNT(*), GROUP BY, percentage calculation
+- When user asks for "high" values, include: AVG() for threshold, WHERE > threshold
+- When user asks for comparisons, include: GROUP BY comparison_column, COUNT(*)
+- Always include the necessary columns for the analysis (e.g., IsManualPayment for manual vs automated)
 
 Your task is to understand what the user wants and determine if you need more information to provide a complete answer. Think like a human analyst who wants to help the user get exactly what they need.
 
@@ -208,6 +229,7 @@ Be conversational, helpful, and natural. Ask questions that a human analyst woul
             print(f"  - Our assessment is_clear: {question_clarity.get('is_clear', False)}")
             print(f"  - has_aggregation: {question_clarity.get('has_aggregation', False)}")
             print(f"  - has_metric: {question_clarity.get('has_metric', False)}")
+            print(f"  - has_business_analysis: {question_clarity.get('has_business_analysis', False)}")
             print(f"  - has_specific_requirements: {question_clarity.get('has_specific_requirements', False)}")
             
             # Override LLM decision if our assessment says the question is clear
@@ -217,14 +239,9 @@ Be conversational, helpful, and natural. Ask questions that a human analyst woul
                 self.conversation_phase = "summarizing"
                 return self._create_summary(gathered_info, user_question, knowledge_data)
             elif analysis.get("needs_clarification", False):
-                self.conversation_phase = "gathering"
-                return {
-                    'clarification_needed': True,
-                    'clarification_question': analysis.get("clarification_question", "Could you provide more details?"),
-                    'gathered_info': gathered_info,
-                    'reasoning': analysis.get("reasoning", "Need more information"),
-                    'conversation_phase': self.conversation_phase
-                }
+                # Use human-in-the-loop for better clarification
+                print(f"[ConversationalIntentAnalyzer] Triggering human-in-the-loop clarification")
+                return self._generate_human_in_loop_questions(user_question, gathered_info, knowledge_data)
             else:
                 # Move to summarizing phase
                 self.conversation_phase = "summarizing"
@@ -400,18 +417,9 @@ Be conversational, business-focused, and avoid all technical database terminolog
                 state['decision_trace'] = decision_trace
                 return state
             else:
-                # Question needs clarification, ask for confirmation
-                return {
-                    'clarification_needed': True,
-                    'clarification_question': f"{summary_data.get('summary', '')}\n\n{summary_data.get('confirmation_question', 'Does this look correct?')}",
-                    'gathered_info': self.requirements_gathered,
-                    'reasoning': "Presenting summary for user confirmation",
-                    'conversation_phase': self.conversation_phase,
-                    'business_description': summary_data.get('business_description', ''),
-                    'data_focus': summary_data.get('data_focus', ''),
-                    'criteria': summary_data.get('criteria', ''),
-                    'expected_outcome': summary_data.get('expected_outcome', '')
-                }
+                # Question needs clarification, use human-in-the-loop validation
+                print(f"[ConversationalIntentAnalyzer] Question needs clarification, triggering human-in-the-loop validation")
+                return self._generate_human_in_loop_questions(user_question, self.requirements_gathered, knowledge_data)
             
         except Exception as e:
             print(f"[ConversationalIntentAnalyzer] Error creating summary: {e}")
@@ -425,68 +433,33 @@ Be conversational, business-focused, and avoid all technical database terminolog
     def _assess_question_clarity(self, gathered_info: Dict[str, Any], user_question: str) -> Dict[str, Any]:
         """
         Assess whether a question is clear enough to proceed directly to SQL generation.
-        Uses generic patterns without hardcoding specific column or metric names.
+        Uses only schema metadata and gathered information, no hardcoded patterns.
         """
         try:
-            # Generic heuristics for clear questions
-            question_lower = user_question.lower()
-            
-            # Generic aggregation patterns
-            aggregation_patterns = [
-                'average', 'avg', 'mean',
-                'sum', 'total', 
-                'count', 'number of',
-                'maximum', 'max', 'highest',
-                'minimum', 'min', 'lowest'
-            ]
-            
-            # Generic metric/score patterns
-            metric_patterns = [
-                'score', 'metric', 'rate', 'ratio',
-                'value', 'amount', 'total'
-            ]
-            
-            # Generic filter patterns
-            filter_patterns = [
-                'above', 'below', 'greater than', 'less than', 'higher than', 'lower than',
-                'more than', 'less than', 'at least', 'at most', 'between', 'within',
-                'equal to', 'equals', '=', '>', '<', '>=', '<='
-            ]
-            
-            # Check if question contains aggregation patterns
-            has_aggregation = any(pattern in question_lower for pattern in aggregation_patterns)
-            
-            # Check if question contains metric/score patterns
-            has_metric = any(pattern in question_lower for pattern in metric_patterns)
-            
-            # Check if question contains filter patterns
-            has_filter = any(pattern in question_lower for pattern in filter_patterns)
-            
-            # Check if we have specific requirements identified
+            # Check if we have specific requirements identified from schema
             has_aggregations = len(gathered_info.get('aggregations', [])) > 0
             has_tables = len(gathered_info.get('tables', [])) > 0
             has_filters = len(gathered_info.get('filters', [])) > 0
+            has_columns = len(gathered_info.get('columns', [])) > 0
             
             print(f"[ConversationalIntentAnalyzer] Clarity assessment details:")
             print(f"  - Question: {user_question}")
-            print(f"  - has_aggregation: {has_aggregation}")
-            print(f"  - has_metric: {has_metric}")
-            print(f"  - has_filter: {has_filter}")
             print(f"  - has_aggregations: {has_aggregations}")
             print(f"  - has_tables: {has_tables}")
             print(f"  - has_filters: {has_filters}")
+            print(f"  - has_columns: {has_columns}")
             print(f"  - gathered_info: {gathered_info}")
             
-            # Question is clear if it has aggregation keywords and we have specific requirements,
-            # OR if it has filter keywords and we have specific requirements
-            is_clear = ((has_aggregation and has_aggregations and has_tables) or 
-                       (has_filter and has_filters and has_tables))
+            # Question is clear if we have specific requirements from schema
+            is_clear = (has_tables and (has_columns or has_filters or has_aggregations))
             
             return {
                 'is_clear': is_clear,
-                'has_aggregation': has_aggregation,
-                'has_metric': has_metric,
-                'has_specific_requirements': has_aggregations and has_tables
+                'has_aggregations': has_aggregations,
+                'has_tables': has_tables,
+                'has_filters': has_filters,
+                'has_columns': has_columns,
+                'has_specific_requirements': has_aggregations or has_filters or has_tables or has_columns
             }
             
         except Exception as e:
@@ -522,6 +495,8 @@ Be conversational, business-focused, and avoid all technical database terminolog
                                 'is_preferred': col_data.get('is_preferred', False)
                             })
             
+            print(f"[ConversationalIntentAnalyzer] Found {len(relevant_columns)} relevant columns: {[col['name'] for col in relevant_columns]}")
+            
             # If multiple relevant columns found, ask user to clarify
             if len(relevant_columns) > 1:
                 return {
@@ -538,26 +513,43 @@ Be conversational, business-focused, and avoid all technical database terminolog
             return {"needs_clarification": False}
 
     def _is_column_relevant_to_question(self, question: str, col_data: Dict) -> bool:
-        """Check if a column is relevant to the user's question."""
+        """Check if a column is relevant to the user's question using only schema metadata."""
         question_lower = question.lower()
         
-        # Check business terms
+        # Extract key terms from the question for better matching
+        question_terms = set()
+        for word in question_lower.split():
+            if len(word) > 2:  # Skip short words
+                question_terms.add(word)
+        
+        # Check business terms from schema metadata (exact match required)
         for term in col_data.get('business_terms', []):
             if term.lower() in question_lower:
                 return True
         
-        # Check relevance keywords
+        # Check relevance keywords from schema metadata (exact match required)
         for keyword in col_data.get('relevance_keywords', []):
             if keyword.lower() in question_lower:
                 return True
         
-        # Check business description
-        if col_data.get('business_description', '').lower() in question_lower:
+        # Check business description from schema metadata (partial match for substantial descriptions)
+        business_desc = col_data.get('business_description', '').lower()
+        if business_desc and len(business_desc) > 10:
+            # Check if any significant words from business description appear in question
+            desc_words = set(word for word in business_desc.split() if len(word) > 3)
+            if desc_words.intersection(question_terms):
+                return True
+        
+        # Check column name (exact match)
+        col_name = col_data.get('name', '').lower()
+        if col_name and col_name in question_lower:
             return True
         
-        # Check column name
-        if col_data.get('name', '').lower() in question_lower:
-            return True
+        # Check for semantic similarity in column names (split into meaningful parts)
+        col_parts = col_name.replace('_', ' ').replace('-', ' ').split()
+        for part in col_parts:
+            if len(part) > 2 and part in question_lower:
+                return True
         
         return False
 
@@ -566,17 +558,81 @@ Be conversational, business-focused, and avoid all technical database terminolog
         question = "I found multiple columns that could be relevant to your question:\n\n"
         
         for i, col in enumerate(relevant_columns, 1):
-            description = col.get('business_description', f"Column: {col['name']}")
+            # Create business-friendly description
+            col_name = col.get('name', '')
+            business_desc = col.get('business_description', '')
+            
+            # If no business description, create one from column name
+            if not business_desc:
+                business_desc = self._create_business_description(col_name)
+            
             priority = col.get('priority', 'medium')
             is_preferred = col.get('is_preferred', False)
             
-            preferred_text = " (Preferred)" if is_preferred else ""
+            preferred_text = " (Recommended)" if is_preferred else ""
             priority_text = f" [{priority.upper()}]" if priority != 'medium' else ""
             
-            question += f"{i}. **{description}** ({col['name']}){preferred_text}{priority_text}\n"
+            question += f"{i}. **{business_desc}**{preferred_text}{priority_text}\n"
         
         question += "\nWhich column would you like me to use for your analysis?"
+        question += "\n\nYou can respond with the number (1, 2, etc.) or describe which one you prefer."
         return question
+    
+    def _create_business_description(self, col_name: str) -> str:
+        """Create a business-friendly description from column name using only schema metadata."""
+        # Simply convert column name to readable format
+        # No hardcoded patterns - let schema metadata handle the business context
+        return f"{col_name.replace('_', ' ').title()}"
+    
+    def _handle_column_clarification_response(self, user_response: str, relevant_columns: List[Dict]) -> Dict[str, Any]:
+        """Handle user response to column clarification."""
+        try:
+            user_response_lower = user_response.lower().strip()
+            
+            # Check if user selected a number
+            if user_response_lower.isdigit():
+                choice_index = int(user_response_lower) - 1
+                if 0 <= choice_index < len(relevant_columns):
+                    selected_column = relevant_columns[choice_index]
+                    print(f"[ConversationalIntentAnalyzer] User selected column: {selected_column['name']}")
+                    return {
+                        'clarification_needed': False,
+                        'selected_column': selected_column,
+                        'conversation_phase': 'column_selected'
+                    }
+            
+            # Check if user described their preference
+            for i, col in enumerate(relevant_columns):
+                col_name = col.get('name', '').lower()
+                business_desc = col.get('business_description', '').lower()
+                
+                # Check if user response matches column name or description
+                if (col_name in user_response_lower or 
+                    any(word in user_response_lower for word in col_name.split('_')) or
+                    any(word in user_response_lower for word in business_desc.split())):
+                    print(f"[ConversationalIntentAnalyzer] User described preference for column: {col['name']}")
+                    return {
+                        'clarification_needed': False,
+                        'selected_column': col,
+                        'conversation_phase': 'column_selected'
+                    }
+            
+            # If no clear match, ask for clarification
+            return {
+                'clarification_needed': True,
+                'clarification_question': "I didn't understand your choice. Please select a number (1, 2, 3, etc.) or describe which column you prefer.",
+                'options': relevant_columns,
+                'conversation_phase': 'column_clarification'
+            }
+            
+        except Exception as e:
+            print(f"[ConversationalIntentAnalyzer] Error handling column clarification: {e}")
+            return {
+                'clarification_needed': True,
+                'clarification_question': "I didn't understand your choice. Please select a number (1, 2, 3, etc.) or describe which column you prefer.",
+                'options': relevant_columns,
+                'conversation_phase': 'column_clarification'
+            }
     
     def _generate_final_intent(self, user_question: str, conversation_context: str, knowledge_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate the final intent after user approval."""
@@ -658,6 +714,32 @@ Be conversational, business-focused, and avoid all technical database terminolog
                     else:
                         overview_parts.append(f"  - {metric}")
         
+        # Add aggregation patterns if available and relevant to the question
+        if 'aggregation_patterns' in schema and schema['aggregation_patterns']:
+            question_lower = question.lower() if question else ""
+            pattern_keywords = ['percentage', 'breakdown', 'vs', 'versus', 'comparison', 'group by', 'aggregation', 'analysis']
+            
+            if any(keyword in question_lower for keyword in pattern_keywords):
+                overview_parts.append("\nAvailable Aggregation Patterns:")
+                for pattern in schema['aggregation_patterns']:
+                    if isinstance(pattern, dict):
+                        pattern_name = pattern.get('name', 'Unknown Pattern')
+                        pattern_keywords = pattern.get('keywords', [])
+                        pattern_example = pattern.get('example_question', 'No example')
+                        overview_parts.append(f"  - {pattern_name}: Keywords: {', '.join(pattern_keywords)} | Example: {pattern_example}")
+        
+        # Add AI preferences if available
+        if 'ai_preferences' in schema and schema['ai_preferences']:
+            overview_parts.append("\nAI Preferences:")
+            for preference in schema['ai_preferences']:
+                if isinstance(preference, dict):
+                    preference_name = preference.get('name', 'Unknown Preference')
+                    preference_value = preference.get('value', 'No value')
+                    preference_description = preference.get('description', '')
+                    overview_parts.append(f"  - {preference_name}: {preference_value}")
+                    if preference_description:
+                        overview_parts.append(f"    Description: {preference_description}")
+        
         for table_name, table_data in tables_list.items():
             if isinstance(table_data, dict):
                 columns = table_data.get('columns', {})
@@ -702,6 +784,233 @@ Be conversational, business-focused, and avoid all technical database terminolog
         """Generate a natural follow-up question."""
         # This would use LLM to generate contextual questions
         return "Could you provide more details about what specific information you're looking for?"
+
+    def _generate_human_in_loop_questions(self, user_question: str, gathered_info: Dict[str, Any], knowledge_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate dynamic human-in-the-loop questions for intent validation.
+        Uses LLM to generate contextual questions based on the current understanding.
+        """
+        print(f"[ConversationalIntentAnalyzer] Generating human-in-the-loop questions")
+        
+        # Build knowledge overview for context
+        knowledge_overview = self._build_knowledge_overview(knowledge_data, user_question)
+        
+        # Create a comprehensive prompt for generating clarification questions
+        clarification_prompt = f"""You are an expert data analyst helping a user clarify their data needs. Based on the user's question and what you understand so far, generate 3-5 dynamic clarification questions that would help ensure you have complete context.
+
+USER'S ORIGINAL QUESTION:
+{user_question}
+
+WHAT I UNDERSTAND SO FAR:
+- Tables: {gathered_info.get('tables', [])}
+- Columns: {gathered_info.get('columns', [])}
+- Filters: {gathered_info.get('filters', [])}
+- Aggregations: {gathered_info.get('aggregations', [])}
+- Time Range: {gathered_info.get('time_range', 'Not specified')}
+- Business Context: {gathered_info.get('business_context', 'Not specified')}
+
+AVAILABLE DATABASE SCHEMA:
+{knowledge_overview}
+
+Generate 3-5 clarification questions that would help ensure complete understanding. The questions should be:
+1. Natural and conversational
+2. Specific to the user's question
+3. Help identify any missing information
+4. Cover potential ambiguities
+5. Be actionable (user can answer them)
+
+Also provide a confidence assessment of your current understanding.
+
+Respond in this JSON format:
+{{
+    "confidence_level": 0.0-1.0,
+    "understanding_complete": true/false,
+    "clarification_questions": [
+        {{
+            "id": "q1",
+            "question": "Natural question text",
+            "purpose": "What this question helps clarify",
+            "required": true/false
+        }},
+        {{
+            "id": "q2", 
+            "question": "Another natural question",
+            "purpose": "What this clarifies",
+            "required": false
+        }}
+    ],
+    "summary": "Brief summary of what you understand and what's still unclear",
+    "recommendations": [
+        "What you recommend asking about",
+        "Potential issues to clarify"
+    ]
+}}"""
+
+        try:
+            # Use LLM to generate dynamic questions
+            messages = [
+                SystemMessage(content="You are an expert data analyst who helps users clarify their data needs through natural conversation."),
+                HumanMessage(content=clarification_prompt)
+            ]
+            
+            response = self.llm.invoke(messages)
+            
+            # Parse the JSON response
+            if hasattr(response, 'content'):
+                response_text = response.content
+            else:
+                response_text = str(response)
+            
+            # Extract JSON from response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                clarification_data = json.loads(json_match.group())
+            else:
+                # Fallback if JSON parsing fails
+                clarification_data = {
+                    "confidence_level": 0.5,
+                    "understanding_complete": False,
+                    "clarification_questions": [
+                        {
+                            "id": "q1",
+                            "question": "Could you clarify what specific information you're looking for?",
+                            "purpose": "General clarification",
+                            "required": True
+                        }
+                    ],
+                    "summary": "Need more information to proceed",
+                    "recommendations": ["Please provide more details about your requirements"]
+                }
+            
+            print(f"[ConversationalIntentAnalyzer] Generated {len(clarification_data.get('clarification_questions', []))} clarification questions")
+            print(f"[ConversationalIntentAnalyzer] Confidence level: {clarification_data.get('confidence_level', 0.0)}")
+            
+            return {
+                'needs_human_clarification': True,
+                'human_in_loop_questions': clarification_data,
+                'conversation_phase': 'human_clarification'
+            }
+            
+        except Exception as e:
+            print(f"[ConversationalIntentAnalyzer] Error generating human-in-loop questions: {e}")
+            # Fallback to simple clarification
+            return {
+                'needs_human_clarification': True,
+                'human_in_loop_questions': {
+                    "confidence_level": 0.3,
+                    "understanding_complete": False,
+                    "clarification_questions": [
+                        {
+                            "id": "q1",
+                            "question": "Could you please clarify what specific information you're looking for?",
+                            "purpose": "General clarification",
+                            "required": True
+                        }
+                    ],
+                    "summary": "Need more information to proceed",
+                    "recommendations": ["Please provide more details"]
+                },
+                'conversation_phase': 'human_clarification'
+            }
+
+    def _handle_human_clarification_response(self, user_response: str, conversation_context: str, knowledge_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle user's response to human-in-the-loop clarification questions.
+        """
+        print(f"[ConversationalIntentAnalyzer] Handling human clarification response")
+        
+        # Use LLM to analyze the user's response and update understanding
+        analysis_prompt = f"""You are an expert data analyst. The user has responded to your clarification questions. Analyze their response and update your understanding of their data needs.
+
+CONVERSATION CONTEXT:
+{conversation_context}
+
+USER'S RESPONSE TO CLARIFICATION:
+{user_response}
+
+CURRENT UNDERSTANDING:
+{self.requirements_gathered}
+
+Analyze the user's response and determine:
+1. What new information did they provide?
+2. Is your understanding now complete?
+3. Do you need any additional clarification?
+4. Can you proceed with SQL generation?
+
+Respond in this JSON format:
+{{
+    "understanding_updated": true/false,
+    "new_information": {{
+        "tables": ["any new tables mentioned"],
+        "columns": ["any new columns mentioned"],
+        "filters": ["any new filters mentioned"],
+        "aggregations": ["any new aggregations mentioned"],
+        "time_range": "any time range mentioned",
+        "business_context": "any business context mentioned"
+    }},
+    "understanding_complete": true/false,
+    "confidence_level": 0.0-1.0,
+    "can_proceed": true/false,
+    "still_unclear": ["what's still unclear"],
+    "next_steps": "what should happen next"
+}}"""
+
+        try:
+            messages = [
+                SystemMessage(content="You are an expert data analyst who helps users clarify their data needs."),
+                HumanMessage(content=analysis_prompt)
+            ]
+            
+            response = self.llm.invoke(messages)
+            
+            if hasattr(response, 'content'):
+                response_text = response.content
+            else:
+                response_text = str(response)
+            
+            # Parse JSON response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                analysis = json.loads(json_match.group())
+            else:
+                analysis = {
+                    "understanding_updated": False,
+                    "new_information": {},
+                    "understanding_complete": False,
+                    "confidence_level": 0.3,
+                    "can_proceed": False,
+                    "still_unclear": ["Need more clarification"],
+                    "next_steps": "Ask for more details"
+                }
+            
+            # Update gathered requirements if new information was provided
+            if analysis.get("understanding_updated", False):
+                new_info = analysis.get("new_information", {})
+                for key, value in new_info.items():
+                    if value and key in self.requirements_gathered:
+                        if isinstance(self.requirements_gathered[key], list):
+                            self.requirements_gathered[key].extend(value)
+                        else:
+                            self.requirements_gathered[key] = value
+            
+            print(f"[ConversationalIntentAnalyzer] Understanding updated: {analysis.get('understanding_updated', False)}")
+            print(f"[ConversationalIntentAnalyzer] Can proceed: {analysis.get('can_proceed', False)}")
+            
+            if analysis.get("can_proceed", False):
+                # Move to summarizing phase
+                self.conversation_phase = "summarizing"
+                return self._create_summary(self.requirements_gathered, user_response, knowledge_data)
+            else:
+                # Need more clarification
+                return self._generate_human_in_loop_questions(user_response, self.requirements_gathered, knowledge_data)
+                
+        except Exception as e:
+            print(f"[ConversationalIntentAnalyzer] Error handling human clarification: {e}")
+            return {
+                'needs_human_clarification': True,
+                'clarification_question': "I need more information to help you. Could you please provide more details about what you're looking for?",
+                'conversation_phase': 'human_clarification'
+            }
     
     def _user_approves_summary(self, user_response: str) -> bool:
         """Check if user approves the summary."""

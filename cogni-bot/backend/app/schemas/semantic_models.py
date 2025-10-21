@@ -1062,7 +1062,7 @@ class DatabaseSchema(BaseModel):
             }
 
             
-
+            
             # Safely convert tables
 
             for name, table in self.tables.items():
@@ -1076,7 +1076,7 @@ class DatabaseSchema(BaseModel):
                     print(f"Error converting table {name}: {e}")
 
                     result["tables"][name] = {"error": f"Failed to convert table: {str(e)}"}
-
+            
             
 
             # Safely convert relationships
@@ -1114,7 +1114,7 @@ class DatabaseSchema(BaseModel):
             except Exception as e:
 
                 print(f"Metrics conversion error: {e}")
-
+            
             
 
             # Safely convert date aliases
@@ -1130,13 +1130,13 @@ class DatabaseSchema(BaseModel):
                     print(f"Error converting date alias {k}: {e}")
 
                     result["date_aliases"][k] = {"error": f"Failed to convert date alias: {str(e)}"}
-
+            
             
 
             if self.schema_prefix:
 
                 result["schema_prefix"] = self.schema_prefix
-
+                
                 
 
             # Include aliases for backward compatibility and frontend support
@@ -1156,7 +1156,7 @@ class DatabaseSchema(BaseModel):
 
 
             return result
-
+            
             
 
         except Exception as e:
@@ -1192,7 +1192,7 @@ class DatabaseSchema(BaseModel):
                 "error": f"Schema conversion failed: {str(e)}"
 
             }
-
+    
     
 
     @classmethod
@@ -1212,7 +1212,7 @@ class DatabaseSchema(BaseModel):
                 date_aliases[k] = DateAlias(**v)
 
             data['date_aliases'] = date_aliases
-
+        
         
 
         # Convert connection_config back to ConnectionConfig object
@@ -1220,7 +1220,7 @@ class DatabaseSchema(BaseModel):
         if 'connection_config' in data:
 
             data['connection_config'] = ConnectionConfig(**data['connection_config'])
-
+        
         
 
         # Convert tables back to SemanticTable objects
@@ -1252,7 +1252,7 @@ class DatabaseSchema(BaseModel):
                         columns[col_name] = SemanticColumn(**col_data)
 
                     table_data['columns'] = columns
-
+                
                 
 
                 # Convert metrics back to BusinessMetric objects
@@ -1266,7 +1266,7 @@ class DatabaseSchema(BaseModel):
                         metrics[metric_name] = BusinessMetric(**metric_data)
 
                     table_data['metrics'] = metrics
-
+                
                 
 
                 # Add the table name to the table data
@@ -1276,7 +1276,7 @@ class DatabaseSchema(BaseModel):
                 tables[table_name] = SemanticTable(**table_data)
 
             data['tables'] = tables
-
+        
         
 
         # Convert relationships back to SemanticRelationship objects
@@ -1296,7 +1296,7 @@ class DatabaseSchema(BaseModel):
                 relationships.append(SemanticRelationship(**rel_data))
 
             data['relationships'] = relationships
-
+        
         
 
         # Convert datetime strings back to datetime objects
@@ -1312,7 +1312,7 @@ class DatabaseSchema(BaseModel):
         if 'updated_at' in data:
 
             data['updated_at'] = datetime.fromisoformat(data['updated_at'].replace('Z', '+00:00'))
-
+        
         
 
         return cls(**data)
@@ -1410,13 +1410,13 @@ USAGE EXAMPLES:
    from app.schemas.semantic_models import DatabaseSchema
 
    
-
+   
    # Load JSON data
 
    with open('schema.json', 'r') as f:
 
        json_data = json.load(f)
-
+   
    
 
    # Create DatabaseSchema instance
@@ -1450,13 +1450,13 @@ USAGE EXAMPLES:
    )
 
    
-
+   
    # Convert to JSON-compatible dictionary
 
    json_dict = schema.to_json_dict()
 
    
-
+   
    # Save to file
 
    with open('output.json', 'w') as f:
@@ -1488,7 +1488,7 @@ USAGE EXAMPLES:
    )
 
    
-
+   
    # Create a table
 
    table = SemanticTable(
@@ -1504,7 +1504,7 @@ USAGE EXAMPLES:
    )
 
    
-
+   
    # Create a relationship
 
    relationship = SemanticRelationship(
@@ -1520,7 +1520,7 @@ USAGE EXAMPLES:
    )
 
    
-
+   
    # Create a metric
 
    metric = BusinessMetric(

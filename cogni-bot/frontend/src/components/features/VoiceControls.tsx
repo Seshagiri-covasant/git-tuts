@@ -2,6 +2,26 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Mic, Square } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 
+// Type definitions for Speech Recognition API
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
+
+interface SpeechRecognitionInterface {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+}
+
 interface VoiceControlsProps {
   onFinalVoiceMessage: (message: string) => void;
 }
@@ -9,11 +29,10 @@ interface VoiceControlsProps {
 
 const VoiceControls: React.FC<VoiceControlsProps> = ({ onFinalVoiceMessage }) => {
   const { isVoiceEnabled } = useAppContext();
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionInterface | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [displayTranscript, setDisplayTranscript] = useState('');
   const transcriptRef = useRef(''); // To store the actual transcript
-  // const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
     if (!isVoiceEnabled) {
@@ -31,7 +50,7 @@ const VoiceControls: React.FC<VoiceControlsProps> = ({ onFinalVoiceMessage }) =>
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = '';
       let final = '';
 
@@ -49,7 +68,7 @@ const VoiceControls: React.FC<VoiceControlsProps> = ({ onFinalVoiceMessage }) =>
       setDisplayTranscript(currentTranscript);
     };
 
-    recognition.onerror = (event) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error);
       setIsRecording(false);
     };

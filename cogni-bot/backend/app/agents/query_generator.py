@@ -48,7 +48,7 @@ class QueryGeneratorAgent:
 
             return []
 
-    def _get_database_specific_instructions(self, db_type, clipped_context=None, question=None):
+    def _get_database_specific_instructions(self, db_type, clipped_context=None, question=None, state=None):
         """Get database-specific SQL generation instructions with unified parameter handling."""
         # Get actual table names
         actual_tables = self._get_actual_table_names()
@@ -60,6 +60,28 @@ class QueryGeneratorAgent:
         schema_ctx = {}
         if clipped_context and isinstance(clipped_context, dict):
             schema_ctx = clipped_context.get("tables", {})
+        
+        # Get aggregation patterns and AI preferences from knowledge data
+        knowledge_data = state.get("knowledge_data", {}) if state else {}
+        if knowledge_data and isinstance(knowledge_data, dict):
+            schema = knowledge_data.get("schema", {})
+            if isinstance(schema, dict):
+                aggregation_patterns = schema.get("aggregation_patterns", [])
+                ai_preferences = schema.get("ai_preferences", [])
+                
+                if aggregation_patterns:
+                    print(f"[QueryGenerator] Found {len(aggregation_patterns)} aggregation patterns")
+                    for pattern in aggregation_patterns:
+                        print(f"  - {pattern.get('name', 'Unknown')}: {pattern.get('keywords', [])}")
+                else:
+                    print("[QueryGenerator] No aggregation patterns found in schema")
+                
+                if ai_preferences:
+                    print(f"[QueryGenerator] Found {len(ai_preferences)} AI preferences")
+                    for preference in ai_preferences:
+                        print(f"  - {preference.get('name', 'Unknown')}: {preference.get('value', 'No value')}")
+                else:
+                    print("[QueryGenerator] No AI preferences found in schema")
         
         # Prepare table list based on database type
         if db_type == "bigquery":
@@ -254,15 +276,69 @@ class QueryGeneratorAgent:
                 return response.content
             return str(response)
 
-    def run(self, state: dict, app_db_util=None, chatbot_db_util=None):
+    def _build_aggregation_patterns_section(self, aggregation_patterns, question):
+        """
+        Build dynamic aggregation patterns section based on schema patterns and user question.
+        """
+        if not aggregation_patterns:
+            return "No aggregation patterns configured in schema."
+        
+        # Find patterns that match the user question
+        question_lower = question.lower() if question else ""
+        matching_patterns = []
+        
+        for pattern in aggregation_patterns:
+            keywords = pattern.get('keywords', [])
+            if any(keyword.lower() in question_lower for keyword in keywords):
+                matching_patterns.append(pattern)
+        
+        if not matching_patterns:
+            return "No aggregation patterns match the current question."
+        
+        # Build the patterns section
+        patterns_text = "MATCHING AGGREGATION PATTERNS:\n"
+        for pattern in matching_patterns:
+            patterns_text += f"\n- {pattern.get('name', 'Unknown Pattern')}:\n"
+            patterns_text += f"  Keywords: {', '.join(pattern.get('keywords', []))}\n"
+            patterns_text += f"  SQL Template: {pattern.get('sql_template', 'No template')}\n"
+            patterns_text += f"  Example: {pattern.get('example_question', 'No example')}\n"
+        
+        patterns_text += "\nUse these patterns to generate appropriate SQL with proper placeholders replaced."
+        return patterns_text
+
+    def _build_ai_preferences_section(self, ai_preferences):
+        """
+        Build AI preferences section for the LLM prompt.
+        """
+        if not ai_preferences:
+            return "No AI preferences configured in schema."
+        
+        preferences_text = "CONFIGURED AI PREFERENCES:\n"
+        for preference in ai_preferences:
+            if isinstance(preference, dict):
+                name = preference.get('name', 'Unknown Preference')
+                value = preference.get('value', 'No value')
+                description = preference.get('description', '')
+                
+                preferences_text += f"\n- {name}: {value}\n"
+                if description:
+                    preferences_text += f"  Description: {description}\n"
+        
+        preferences_text += "\nUse these preferences to guide your SQL generation approach and style."
+        return preferences_text
+
+    def run(self, state: Dict[str, Any], app_db_util=None, chatbot_db_util=None):
         try:
             # Use passed-in db utils if provided, else use instance
             app_db_util = app_db_util or self.app_db_util
             chatbot_db_util = chatbot_db_util or self.chatbot_db_util
 
+            # Initialize variables at the beginning of the method
+            aggregation_patterns = []
+            ai_preferences = []
+            question = None
 
             # Extract the latest human question (ignore system messages we added)
-            question = None
             for msg in reversed(state.get("messages", [])):
                 # Handle LangChain message objects
                 if hasattr(msg, "content") and hasattr(msg, "__class__"):
@@ -367,7 +443,8 @@ class QueryGeneratorAgent:
                     db_instructions = self._get_database_specific_instructions(
                         db_type, 
                         clipped_context=clipped, 
-                        question=question
+                        question=question,
+                        state=state
                     )
                 except Exception as e:
                     logging.warning(f"Database prompt generation failed for {db_type}: {e}")
@@ -493,10 +570,25 @@ INSTRUCTIONS:
  6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
  7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
 
+DYNAMIC AGGREGATION PATTERNS:
+{self._build_aggregation_patterns_section(aggregation_patterns, question)}
+
+AI PREFERENCES:
+{self._build_ai_preferences_section(ai_preferences)}
+
+COMPLEX AGGREGATION PATTERNS:
+- For percentage questions: Use COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () for percentages
+- For "high" values: Use CTEs with AVG() to calculate thresholds, then filter WHERE column > threshold
+- For comparisons (vs, versus): Use GROUP BY with the comparison column
+- For breakdowns: Use GROUP BY with appropriate categorical columns
+
+EXAMPLE PATTERNS:
+- "What percentage of X are Y vs Z?" → WITH threshold AS (SELECT AVG(score) FROM table), SELECT category, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS percentage FROM table, threshold WHERE score > threshold.avg GROUP BY category
+- "High-risk payments by type" → WITH avg_risk AS (SELECT AVG(risk_score) FROM payments), SELECT payment_type, COUNT(*) FROM payments, avg_risk WHERE risk_score > avg_risk.avg GROUP BY payment_type
+
 Generate the SQL query:"""
 
             # LOGGING: What data is being sent to LLM
-            print(f"\n{'='*60}")
             print(f"QUERY GENERATOR: Data being sent to LLM")
             print(f"{'='*60}")
             print(f"Prompt Length: {len(enhanced_prompt)} characters")
@@ -504,7 +596,6 @@ Generate the SQL query:"""
             print(f"Relationship Limit: {relationship_limit}")
             print(f"Context Length: {len(clipped_limited)} characters")
             print(f"User Question: {question}")
-            print(f"{'='*60}\n")
             
             # Use invoke() for LLM call with timeout handling
             try:

@@ -252,6 +252,25 @@ class AgentManager:
             # Log business metrics
             if 'metrics' in schema:
                 print(f"Business Metrics: {len(schema['metrics'])} metrics")
+            
+            # Log aggregation patterns
+            if 'aggregation_patterns' in schema:
+                print(f"Aggregation Patterns: {len(schema['aggregation_patterns'])} patterns")
+                for pattern in schema['aggregation_patterns']:
+                    print(f"  - {pattern.get('name', 'Unknown')}: {pattern.get('keywords', [])}")
+            else:
+                print("No aggregation patterns found in schema")
+            
+            # Log AI preferences
+            if 'ai_preferences' in schema:
+                print(f"AI Preferences: {len(schema['ai_preferences'])} preferences")
+                for preference in schema['ai_preferences']:
+                    print(f"  - {preference.get('name', 'Unknown')}: {preference.get('value', 'No value')}")
+            else:
+                print("No AI preferences found in schema")
+            
+            # Log metrics details
+            if 'metrics' in schema:
                 for metric in schema['metrics']:
                     print(f"  - {metric.get('name', 'Unknown')}: {metric.get('expression', 'No expression')}")
             

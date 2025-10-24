@@ -15,6 +15,7 @@ from .answer_rephraser import AnswerRephraser
 from .domain_relevance_checker import DomainRelevanceCheckerAgent
 from .conversational_intent_analyzer import ConversationalIntentAnalyzer
 from .conversational_memory_manager import ConversationalMemoryManager
+from .human_approval_agent import HumanApprovalAgent
 from .planner import Planner
 from .llm_factory import get_llm
 from .ba_reporter import generate_llm_ba_summary
@@ -124,6 +125,9 @@ class AgentManager:
         query_validator = QueryValidatorAgent(self.llm, self.db_util, chatbot_db_util=self.chatbot_db_util)
         query_executor = QueryExecutor(self.db_util)
         answer_rephraser = AnswerRephraser(query_generator)
+        
+        # Initialize human approval agent
+        human_approval_agent = HumanApprovalAgent(self.llm)
 
         self.planner = Planner(
             domain_relevance_checker,
@@ -139,7 +143,8 @@ class AgentManager:
             app_db_util=self.db_util,
             chatbot_db_util=self.chatbot_db_util,
             chatbot_id=self.chatbot_id,
-            conversational_intent_analyzer=conversational_intent_analyzer
+            conversational_intent_analyzer=conversational_intent_analyzer,
+            human_approval_agent=human_approval_agent
         )
         self.graph = self.planner.graph
 
@@ -191,6 +196,24 @@ class AgentManager:
                 semantic_schema = get_semantic_schema_service(self.chatbot_id)
                 print(f"[AgentManager] Loaded semantic schema with {len(semantic_schema.get('tables', {}))} tables")
                 print(f"[AgentManager] Semantic schema metrics: {len(semantic_schema.get('metrics', []))} metrics")
+                
+                # 🔍 DEBUG: Check what priority fields are being passed to agents
+                print("🔍 AGENT MANAGER DEBUG: Checking schema for priority fields...")
+                for table_name, table_data in semantic_schema.get('tables', {}).items():
+                    if isinstance(table_data, dict) and 'columns' in table_data:
+                        for col_name, col_data in table_data['columns'].items():
+                            if isinstance(col_data, dict):
+                                priority_fields = {
+                                    'priority': col_data.get('priority'),
+                                    'business_description': col_data.get('business_description'),
+                                    'business_terms': col_data.get('business_terms'),
+                                    'is_preferred': col_data.get('is_preferred'),
+                                    'use_cases': col_data.get('use_cases'),
+                                    'relevance_keywords': col_data.get('relevance_keywords')
+                                }
+                                # Only log if any priority fields are present
+                                if any(priority_fields.values()):
+                                    print(f"🔍 AGENT MANAGER PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
                 
                 # Convert semantic schema to the format expected by agents
                 schema_data = {
@@ -289,6 +312,18 @@ class AgentManager:
                         print(f"      Description: {col_data.get('description', 'None')}")
                         print(f"      Business Context: {col_data.get('business_context', 'None')}")
                         print(f"      Exclude Column: {col_data.get('exclude_column', False)}")
+                        
+                        # 🔍 LOG PRIORITY FIELDS: Check if agents receive priority fields
+                        priority_fields = {
+                            'priority': col_data.get('priority'),
+                            'business_description': col_data.get('business_description'),
+                            'business_terms': col_data.get('business_terms'),
+                            'is_preferred': col_data.get('is_preferred'),
+                            'use_cases': col_data.get('use_cases'),
+                            'relevance_keywords': col_data.get('relevance_keywords')
+                        }
+                        if any(priority_fields.values()):
+                            print(f"      🔍 PRIORITY FIELDS: {priority_fields}")
                     
                     if len(columns) > 5:
                         print(f"    ... and {len(columns) - 5} more columns")
@@ -582,6 +617,55 @@ class AgentManager:
                 "steps": debug_steps
             }
         }
+    
+    def continue_with_human_approval(self, conv_id: str, human_response: Dict[str, Any], llm_name: str = None, temperature: float = None):
+        """
+        Continue the workflow after human approval response.
+        """
+        current_temperature = temperature if temperature is not None else self.temperature
+        logging.debug(f"Continuing workflow for conv_id: {conv_id} with human response")
+        
+        # Load conversation history into LangChain memory
+        self._load_conversation_memory(conv_id)
+        
+        # Get the conversation history from memory
+        conversation_history = self.memory.chat_memory.messages
+        print(f"[AgentManager] Retrieved {len(conversation_history)} messages from LangChain memory")
+        
+        # Load schema information for the agents
+        schema_info = self._load_schema_info()
+        
+        # Create inputs for continuing the workflow
+        inputs = {
+            "messages": conversation_history,
+            "user_question": f"Human approval response: {human_response.get('type', 'approval')}",
+            "conversation_history": [{"role": "user", "content": msg.content} if hasattr(msg, 'content') else {"role": "user", "content": str(msg)} for msg in conversation_history],
+            "knowledge_data": schema_info,
+            "human_response": human_response
+        }
+        
+        # Continue the workflow from where it was interrupted
+        config = {"configurable": {"thread_id": conv_id}}
+        
+        try:
+            # Stream the workflow continuation
+            final_result = {}
+            for chunk in self.graph.stream(inputs, config):
+                print(f"[AgentManager] Workflow chunk: {list(chunk.keys())}")
+                for node_name, node_output in chunk.items():
+                    print(f"[AgentManager] Node {node_name} output keys: {list(node_output.keys()) if isinstance(node_output, dict) else 'Not a dict'}")
+                    if isinstance(node_output, dict):
+                        final_result.update(node_output)
+            
+            print(f"[AgentManager] Final result keys: {list(final_result.keys())}")
+            return final_result
+            
+        except Exception as e:
+            logging.error(f"Error in workflow continuation: {e}")
+            return {
+                "error": str(e),
+                "final_result": f"Error continuing workflow: {e}"
+            }
 
     def process_conversational_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Process a query using enhanced conversational flow with human-like dialogue."""

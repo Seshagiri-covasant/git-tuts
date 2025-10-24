@@ -87,7 +87,65 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({
     setIsLoadingSchema(true);
     try {
       const response = await getChatbotSchema(chatbotId);
-      setSchemaPreview(response.data.schema_summary);
+      
+      // Handle semantic schema response
+      let schemaText = "";
+      if (response.data.schema_summary) {
+        // Raw schema format
+        schemaText = response.data.schema_summary;
+      } else if (response.data.tables) {
+        // Enhanced semantic schema format - create a summary
+        schemaText = `Enhanced Database Schema (with AI Selection Metadata)\n`;
+        schemaText += `Database Type: ${response.data.database_type || 'Unknown'}\n`;
+        schemaText += `Total Tables: ${Object.keys(response.data.tables).length}\n\n`;
+        
+        for (const [tableName, tableData] of Object.entries(response.data.tables)) {
+          const table = tableData as any;
+          schemaText += `Table: ${tableName}\n`;
+          if (table.business_context) {
+            schemaText += `  Business Context: ${table.business_context}\n`;
+          }
+          
+          const columns = table.columns || {};
+          schemaText += `  Columns (${Object.keys(columns).length}):\n`;
+          
+          for (const [colName, colData] of Object.entries(columns)) {
+            const col = colData as any;
+            // Basic column info
+            const pkMarker = (col.is_primary_key || col.pk) ? " (PK)" : "";
+            const fkMarker = (col.is_foreign_key || col.fk) ? " (FK)" : "";
+            const typeInfo = col.type || col.data_type || 'unknown';
+            
+            schemaText += `    - ${colName}: ${typeInfo}${pkMarker}${fkMarker}\n`;
+            
+            // Enhanced metadata
+            if (col.description) {
+              schemaText += `      Description: ${col.description}\n`;
+            }
+            if (col.business_terms && col.business_terms.length > 0) {
+              schemaText += `      Business Terms: ${col.business_terms.join(', ')}\n`;
+            }
+            if (col.priority && col.priority !== 'medium') {
+              schemaText += `      Priority: ${col.priority.toUpperCase()}\n`;
+            }
+            if (col.is_preferred) {
+              schemaText += `      Preferred Column: Yes\n`;
+            }
+            if (col.use_cases && col.use_cases.length > 0) {
+              schemaText += `      Use Cases: ${col.use_cases.join(', ')}\n`;
+            }
+            if (col.relevance_keywords && col.relevance_keywords.length > 0) {
+              schemaText += `      Relevance Keywords: ${col.relevance_keywords.join(', ')}\n`;
+            }
+            if (col.business_context) {
+              schemaText += `      Business Context: ${col.business_context}\n`;
+            }
+          }
+          schemaText += "\n";
+        }
+      }
+      
+      setSchemaPreview(schemaText);
       setSchemaLoaded(true);
       return true;
     } catch (error: any) {

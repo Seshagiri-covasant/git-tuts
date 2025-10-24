@@ -10,7 +10,6 @@ import {
   getChatbotSchema,
   updateKnowledgeBaseSettings,
   previewGlobalTemplate,
-  getDebugInformation,
 
 } from "../services/api";
 import api from "../services/api";
@@ -18,7 +17,6 @@ import { useToaster } from "../Toaster/Toaster";
 import Loader from "./Loader";
 import MultiDatabaseConfig from "./MultiDatabaseConfig";
 import SemanticSchemaEditor from "./SemanticSchemaEditor";
-import { DebugPanel } from "./DebugPanel";
 
 
 interface DatabaseConnection {
@@ -52,10 +50,6 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
   onClose,
   onPromptReady,
 }) => {
-  // Add debug mode toggle button at the top right
-  const toggleDebugPanel = useCallback(() => {
-    setShowDebugPanel(prev => !prev);
-  }, []);
   const [formData, setFormData] = useState({
     name: "",
     aiModel: "",
@@ -102,8 +96,6 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
   const [selected, setSelected] = useState<"create" | "select" | "default" | null>(null);
   const [showFinalPromptPreview, setShowFinalPromptPreview] = useState(false);
   const [finalPromptContent, setFinalPromptContent] = useState<string>("");
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [debugSteps, setDebugSteps] = useState<any[]>([]);
   // Add state for uploaded file at the top of the component
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   // Add state for password visibility
@@ -182,17 +174,6 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
     }
   }, [currentStep]);
 
-  // Handle debug information updates
-  const updateDebugInfo = useCallback(async (conversationId: string, interactionId: string) => {
-    try {
-      const debugData = await getDebugInformation(conversationId, interactionId);
-      if (debugData?.debug?.steps) {
-        setDebugSteps(debugData.debug.steps);
-      }
-    } catch (error) {
-      console.error('Error fetching debug information:', error);
-    }
-  }, []);
 
   // Initialize step 6 validation state when reaching step 6
   useEffect(() => {
@@ -286,7 +267,30 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
           setChatbotId(chatbotId);
         } else if (currentStep === 2) {
           // Configure LLM on second step with temperature
-          await setLLMSettings(chatbotId, formData.aiModel, formData.temperature);
+          // Check if chatbot is already configured to avoid duplicate LLM configuration
+          try {
+            // First check the chatbot status
+            const chatbotInfo = await api.get(`/api/chatbots/${chatbotId}`);
+            console.log('🔍 Chatbot Info Response:', chatbotInfo.data);
+            const chatbotStatus = chatbotInfo.data?.status;
+            console.log('🔍 Chatbot Status:', chatbotStatus);
+            
+            // Only configure LLM if chatbot is in the right status
+            if (chatbotStatus === 'created' || chatbotStatus === 'db_configured') {
+              await setLLMSettings(chatbotId, formData.aiModel, formData.temperature);
+            } else {
+              console.log(`Chatbot status is ${chatbotStatus}, skipping LLM configuration...`);
+              // Show a user-friendly message that LLM is already configured
+              showToast(`LLM is already configured for this chatbot (Status: ${chatbotStatus || 'unknown'})`, 'success');
+            }
+          } catch (error: any) {
+            // If the error is about chatbot status, skip LLM configuration
+            if (error.response?.data?.error?.includes("Chatbot must be in 'created' or 'db_configured' status")) {
+              console.log("LLM already configured, skipping...");
+            } else {
+              throw error;
+            }
+          }
         } else if (currentStep === 3) {
           // Configure only the first database connection for now
           if (databaseConnections.length > 0) {
@@ -497,14 +501,77 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
       const response = await getChatbotSchema(chatbotId);
       console.log("Schema response:", response);
       
-      if (response.data && response.data.schema_summary) {
-        console.log("Setting schema:", response.data.schema_summary.substring(0, 100) + "...");
-        setSchemaPreview(response.data.schema_summary);
-        setSchemaLoaded(true);
-        console.log("Schema loaded successfully");
-        return true;
+      if (response.data) {
+        // Handle semantic schema response
+        let schemaText = "";
+        if (response.data.schema_summary) {
+          // Raw schema format
+          schemaText = response.data.schema_summary;
+        } else if (response.data.tables) {
+          // Enhanced semantic schema format - create a summary
+          schemaText = `Enhanced Database Schema (with AI Selection Metadata)\n`;
+          schemaText += `Database Type: ${response.data.database_type || 'Unknown'}\n`;
+          schemaText += `Total Tables: ${Object.keys(response.data.tables).length}\n\n`;
+          
+          for (const [tableName, tableData] of Object.entries(response.data.tables)) {
+            const table = tableData as any;
+            schemaText += `Table: ${tableName}\n`;
+            if (table.business_context) {
+              schemaText += `  Business Context: ${table.business_context}\n`;
+            }
+            
+            const columns = table.columns || {};
+            schemaText += `  Columns (${Object.keys(columns).length}):\n`;
+            
+            for (const [colName, colData] of Object.entries(columns)) {
+              const col = colData as any;
+              // Basic column info
+              const pkMarker = (col.is_primary_key || col.pk) ? " (PK)" : "";
+              const fkMarker = (col.is_foreign_key || col.fk) ? " (FK)" : "";
+              const typeInfo = col.type || col.data_type || 'unknown';
+              
+              schemaText += `    - ${colName}: ${typeInfo}${pkMarker}${fkMarker}\n`;
+              
+              // Enhanced metadata
+              if (col.description) {
+                schemaText += `      Description: ${col.description}\n`;
+              }
+              if (col.business_terms && col.business_terms.length > 0) {
+                schemaText += `      Business Terms: ${col.business_terms.join(', ')}\n`;
+              }
+              if (col.priority && col.priority !== 'medium') {
+                schemaText += `      Priority: ${col.priority.toUpperCase()}\n`;
+              }
+              if (col.is_preferred) {
+                schemaText += `      Preferred Column: Yes\n`;
+              }
+              if (col.use_cases && col.use_cases.length > 0) {
+                schemaText += `      Use Cases: ${col.use_cases.join(', ')}\n`;
+              }
+              if (col.relevance_keywords && col.relevance_keywords.length > 0) {
+                schemaText += `      Relevance Keywords: ${col.relevance_keywords.join(', ')}\n`;
+              }
+              if (col.business_context) {
+                schemaText += `      Business Context: ${col.business_context}\n`;
+              }
+            }
+            schemaText += "\n";
+          }
+        }
+        
+        if (schemaText) {
+          console.log("Setting enhanced schema:", schemaText.substring(0, 100) + "...");
+          setSchemaPreview(schemaText);
+          setSchemaLoaded(true);
+          console.log("Enhanced schema loaded successfully");
+          return true;
+        } else {
+          console.log("No schema data in response:", response.data);
+          showToast("No schema data available", "error");
+          return false;
+        }
       } else {
-        console.log("No schema data in response:", response.data);
+        console.log("No response data:", response);
         showToast("No schema data available", "error");
         return false;
       }
@@ -768,19 +835,7 @@ const ChatbotCreator: React.FC<ChatbotCreatorProps> = ({
           </div>
         </div>
 
-        {/* Debug Panel Toggle Button */}
-        <div className="absolute top-4 right-16">
-          <button
-            onClick={toggleDebugPanel}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg flex items-center space-x-2"
-          >
-            <Brain className="w-4 h-4" />
-            <span>Debug Mode</span>
-          </button>
-        </div>
 
-        {/* Debug Panel */}
-        <DebugPanel steps={debugSteps} isVisible={showDebugPanel} />
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto pt-[96px]">

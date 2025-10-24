@@ -1,0 +1,243 @@
+Table Name,Column Name,Description,Business Context,Exclude Column,Data Type,Is Primary Key,Is Foreign Key
+Payments,AdditionalPaymentID,Any additional payment reference or identifier used.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,AmountExcl_RC,Amount excluding tax in reported currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AmountExcl_VC,Amount excluding tax in vendor currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AmountIncl_RC,Total amount including tax in reported currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AmountIncl_VC,Total amount including tax in vendor currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AmountVat_RC,Total tax amount in reported currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AmountVat_VC,Total tax amount in vendor currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,Asso#INV,Count of associated Invoice numbers,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,int,No,No
+Payments,Asso#PO,Count of associated purchase order numbers,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,int,No,No
+Payments,Asso#PR,Count of associated purchase requisitions,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,int,No,No
+Payments,AssoINVAmount_RC,Associated invoice amount in reporting currency,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AssoINVRiskScore,Associated invoice risk score,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,AssoPOAmount_RC,Associated purchase order amount in reporting currency,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AssoPORiskScore,Associated purchase order risk score,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,AssoPRAmount_RC,Associated purchase requisition amount in reporting currency,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,AssoPRRiskScore,Associated purchase requisition risk score,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,AuthorizedBy,ID or name of the person who authorized payment.,"Tracks who created, captured, or modified the data and when.",No,nvarchar,No,No
+Payments,COITag,Conflict of Interest indicator tag for the vendor.,General payment or operational data field.,No,nvarchar,No,No
+Payments,CPIRank,Rank of the vendor based on CPI score among all vendors.,General payment or operational data field.,No,int,No,No
+Payments,CPIScore,Corruption Perception Index Score at vendor level,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,CapturedBy,User ID or name of the person who captured the entry.,"Tracks who created, captured, or modified the data and when.",No,nvarchar,No,No
+Payments,CompanyCode,Internal company code processing this payment.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,CompanyCodeCountry,,,No,nvarchar,No,No
+Payments,CompanyCodeCountryName,,,No,nvarchar,No,No
+Payments,CompanyCodeName,Name of the internal company code entity.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,CumulativeRiskScore,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,DateAuthorized,Date the payment was authorized.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,DateCaptured,Date and time when the entry was captured.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,DateDocumented,Date the document/invoice was created in the system.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,DebitCreditIndicator,Indicates whether the line is a debit or credit.,General payment or operational data field.,No,nvarchar,No,No
+Payments,FiscalYear,Fiscal year for financial reporting of the transaction.,General payment or operational data field.,No,nvarchar,No,No
+Payments,GLAccountDescription,Description of the GL account.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,GLAccountGroup,GL account grouping code.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,GLAccountRiskCategory,Risk category associated with GL account used.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,HouseBankID,Organization’s internal bank identifier for payment.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,HouseBankKey,Internal key/code for organization's house bank.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,InterCompanyFlag,Indicates if payment is between related group companies.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,InvoiceCompanyCode,Company code as recorded on the original invoice.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,InvoiceLineRef,Reference for the individual line item on the invoice.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,InvoiceType,"Classification of the invoice type (goods, services, etc.).","Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,IsDuplicateFlagged,Flag for system-identified potential duplicate payment.,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,varchar,No,No
+Payments,IsManualPayment,Flag for manually processed payments.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,LookbackFlag,,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,ML_Prediction,Whether is line item is identified as a potential review candidate by Machine Learning,Generated outputs from ML models for fraud or anomaly detection.,No,int,No,No
+Payments,ML_Risk_Score,Review candidate probability by machine learning,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,ModifiedOn,Date and time the entry was last modified.,"Tracks who created, captured, or modified the data and when.",No,datetime,No,No
+Payments,OneTimeVendorFlag,Indicates if the vendor is a one-time or infrequent vendor.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,Overall_Risk_Score,Vendor risk score,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,Overall_Tran_Risk_Score,Payments line item risk score,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PACPY101,Payment(s) with matched Keyword(s) in Payment description(s) - English,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PACPY101_Keyword_Category,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PACPY101_Keyword_Translated,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PACPY101_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PACPY102,Payment(s) to Vendor(s) with Government keyword(s) in Vendor Name,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PACPY102_GovernmentKeyword,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PACPY102_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCIPY146,"Payments to Employee(s) in Vendor Master with same Addresses, different Names","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY146_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCIPY146_MatchingAddEmployees,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY146_MatchingEmployeeAdd,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY146_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCIPY151,"Duplicate Payment(s) with same Vendor, same Amount, different Date(s), same Invoice number, different Payees (Vendor(s)) with Conflict of Interest","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY151_COIType,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY151_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCIPY151_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCIPY152,"Duplicate Payment(s) with same Vendor, same Amount, different Date(s), same Invoice number, different Payees (Vendor and Employee) with Conflict of Interest","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY152_COIType,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCIPY152_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCIPY152_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY220,"Duplicate Payment(s) with same Vendor, same Amount, same Date, same Invoice number","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY220_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY220_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY221,"Duplicate Payment(s) with Blank Vendor number, same Amount, same Date and Blank Invoice number","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY221_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY221_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY222,"Duplicate Payment(s) with same Vendor, same Amount, same Date, similar Invoice number(s)","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY222_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY222_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY223,"Duplicate Payment(s) with same Vendor, same Amount, same Date, different Invoice number(s)","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY223_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY223_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY224,"Duplicate Payment(s) with different Vendor(s), same Amount, same Date, same Invoice number","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY224_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY224_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY225,"Duplicate Payment(s) with different Vendor(s), same Amount, same Date, similar Invoice number(s)","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY225_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY225_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY226,"Duplicate Payment(s) with same Vendor, same Amount, different Date(s), similar Invoice number(s)","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY226_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY226_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PCRPY227,"Duplicate Payment(s) with same Vendor, same Amount, different Date(s), same Invoice number","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PCRPY227_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PCRPY227_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY215,Payment(s) to Vendor(s) on same Date of Vendor creation,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY215_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY215_VendorCreationDate,,Contains attributes that identify and describe vendors or suppliers.,No,date,No,No
+Payments,P2PFMPY251,Payment to Vendor(s) before PO creation,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY251_DifferenceInDays,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PFMPY251_PODate,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,P2PFMPY251_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY252,"Payment against a cancelled or deleted PO, where PO is required","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY252_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY253,Monthly Recurring Payments (3 or more consecutive months),"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY253_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PFMPY253_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY255,"Payment(s) to Vendor(s) where Payment terms include ""immediate"" ""Advance"" etc","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY255_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY256,"Payment(s) to Vendor(s) with Vendor names like ""misc, one-time, cash, anonymous etc.","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY256_Keyword,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY256_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY257,"Payment(s) to Vendor(s) with Invalid address(es) (""apartment"", ""care of"", PO Box etc.)","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY257_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY261,Payments made on Weekend(s) or Public holiday(s),"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY261_HolidayOrWeekends,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY261_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY262,Round Currency Payment(s),"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY262_RoundedTo,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY262_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY264,Payment(s) to Vendor(s) not listed in Vendor Master,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY264_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY266,Payment(s) to Vendor(s) with mismatch between Vendor Bank Account and Payee Bank Account,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY266_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY267,Payment(s) to Vendor(s) with mismatch between Vendor Address and Payee Address,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY267_MismatchedVendorAdd,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,P2PFMPY267_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY268,Payment(s) to Vendor(s) with mismatch between Vendor Currency and Payment Currency,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY268_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY270,"Payment(s) to same Vendor, but to more than one bank account","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY270_AccountNumber,,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,P2PFMPY270_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY271,Vendor(s) with one Payment,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY271_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY272,One Time Vendor(s) with multiple Payments,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY272_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY273,Multiple Payments to same Vendor on same Date,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY273_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PFMPY273_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PFMPY603,"Payments to an Invoice, with corresponding Cancelled Invoices, whose total value is Zero or negative","Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PFMPY603_GRD,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,int,No,No
+Payments,P2PFMPY603_TotalInvoiceAmount,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,P2PFMPY603_TotalPaymentAmount,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,P2PFMPY603_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PHRPY301,Payment(s) made to Vendor(s) in high-risk Country using CPI Index,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY301_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PHRPY302,Risky Vendors - Vendor name(s) matching with OFAC Sanctions List,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY302_OFACName,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY302_SanctionedProgram,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY302_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PHRPY303,Risky Vendors - Vendor name matches using Panama Papers - Payments,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY303_JurisdictionDescription,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY303_PanamaName,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY303_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PHRPY304,Risky Vendors - Vendor address matches using Panama Papers - Payments,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY304_Country,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY304_PanamaAddress,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY304_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PHRPY305,Risky Vendors - Payment(s) from Vendor(s) from Embargoed Countries,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY305_AdditionalEmbargoDetails,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY305_IssuingAuthority,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PHRPY305_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PHRPY305_TypeandScopeofEmbargoorSanction,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,P2PICPY601,Payment(s) to Vendor(s) without invoice(s),Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,P2PICPY601_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PICPY602,Payment Amount greater than Invoice Amount,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,P2PICPY602_GRD,,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,int,No,No
+Payments,P2PICPY602_TotalInvoiceAmount,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,P2PICPY602_TotalPaymentAmount,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,P2PICPY602_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PICPY605,"Transaction(s) with same PR date, PO date, invoice date and payment date",Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,P2PICPY605_PRDate,,,No,date,No,No
+Payments,P2PICPY605_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PPVPY741,Split Payments against an invoice,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,P2PPVPY741_GRD,,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,int,No,No
+Payments,P2PPVPY741_TotalInvoiceAmount,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,P2PPVPY741_TotalPaymentAmount,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,P2PPVPY741_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,P2PSTPY990,Outlier and unusual Payment(s) using Statistical Anomaly detection by Vendor(s),Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,P2PSTPY990_Max_Threshold,,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,decimal,No,No
+Payments,P2PSTPY990_Min_Threshold,,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,decimal,No,No
+Payments,P2PSTPY990_Tran_Score,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,PayeeAddress,Address of the payee.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeBankAccount,Bank account number of the payee.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,PayeeBankCountry,Country where payee’s bank is located.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeBankNo,Bank code/number of the payee’s bank.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeCity,City of the payee.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeCountry,Country of payee.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeIBAN,IBAN number of the payee’s bank account.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeName,Name of the actual payee for this payment.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeePOBox,PO Box number of the payee (if any).,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,nvarchar,No,No
+Payments,PayeePostalCode,Postal code of the payee.,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,PayeeRegion,Region/state/province of the payee.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PayeeSWIFT,SWIFT code of the payee’s bank.,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,PaymentDescription,Description or narration for the payment.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,PaymentMethod,"Method used for making payment (NEFT, cheque etc.).","Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,PaymentOrClearingDate,Date the payment was cleared or settled.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,PaymentRunDate,Date the payment was processed in a payment run.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,PaymentTerms,Payment terms as agreed with the vendor.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,Phase,Workflow or process phase for the payment.,Contains workflow and system-level technical fields used for process tracking.,No,nvarchar,No,No
+Payments,PhaseNo,Numeric code for phase/stage of the process.,Contains workflow and system-level technical fields used for process tracking.,No,int,No,No
+Payments,PhysicalInvoiceNo,Invoice number from the physical or scanned invoice.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,PostingDate,Date the transaction was posted in the ledger.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,date,No,No
+Payments,PostingKey,Code indicating posting type (debit/credit).,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,nvarchar,No,No
+Payments,PreviousRiskScore,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,PreviousTranRiskScore,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,decimal,No,No
+Payments,Rank,,General payment or operational data field.,No,int,No,No
+Payments,RefNo,External or cross-reference number for the payment line.,General payment or operational data field.,No,nvarchar,No,No
+Payments,Region,Geographical region relevant to the payment/vendor.,General payment or operational data field.,No,nvarchar,No,No
+Payments,RowNumber,,General payment or operational data field.,No,int,No,No
+Payments,SPT_InvoiceID,Associated inoice numbers separated by ; or |,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,SPT_PO,Associated purchase order numbers separate by ; or |,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,nvarchar,No,No
+Payments,SPT_PR,Associated purchase requisition numbers separated by ; or |,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,nvarchar,No,No
+Payments,SPT_PayeeAddress,,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,SPT_PayeeBankAccount,,"Links the payment record to internal systems, ledgers, and organizational codes.",No,nvarchar,No,No
+Payments,SPT_PayeeName,,"Details about payee accounts, banks, and related identifiers used for fund transfers.",No,nvarchar,No,No
+Payments,SPT_PaymentID,,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,SPT_Reversal_Flag,Whether this payment was reversed,Binary or categorical indicators marking transactions or vendors for potential fraud or compliance issues.,No,nvarchar,No,No
+Payments,SPT_Reversal_Group,Group ID of the group that indicated all payments reversed together.,Contains workflow and system-level technical fields used for process tracking.,No,bigint,No,No
+Payments,SPT_RowId,Line Item level primary key,Contains workflow and system-level technical fields used for process tracking.,No,bigint,Yes,No
+Payments,SPT_Source,,Contains workflow and system-level technical fields used for process tracking.,No,nvarchar,No,No
+Payments,SPT_TablePrimaryKey,,"Links between payments and procurement-related documents (PR, PO, Invoices).",No,nvarchar,No,No
+Payments,SPT_VendorAddress,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,SPT_VendorBankAccounts,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,SPT_VendorContacts,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,SPT_VendorEmail,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,SPT_VendorNumber,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,SPT_VendorTaxID,,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,SystemInvoiceNo,System-generated invoice number.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,SystemPaymentNo,System-generated unique payment number.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,nvarchar,No,No
+Payments,Tests_Failed,,General payment or operational data field.,No,nvarchar,No,No
+Payments,Tests_FailedID,,General payment or operational data field.,No,int,No,No
+Payments,Tests_Failed_Count,,General payment or operational data field.,No,int,No,No
+Payments,Tests_Failed_RiskCategory,,"Holds fields related to compliance, corruption index, and transaction risk scoring.",No,nvarchar,No,No
+Payments,TotalInvoiceAmountRC,Total invoice amount in reporting currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,TotalInvoiceAmountVC,Total invoice amount in vendor currency.,"Includes key payment transaction information such as invoice data, amounts, and posting details.",No,decimal,No,No
+Payments,VendorCategory,Classification or category of the vendor.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,VendorCountry,Country code of the vendor’s registered address.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,VendorCountryCurrency,Currency code of the vendor’s country.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,VendorCountryName,Full country name of the vendor.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,VendorCurrency,Currency code in which payment to the vendor is made.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,VendorName,Name of the vendor.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,VendorNumber,Unique identifier for the vendor in the system.,Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No
+Payments,WhiteListedVendorFlag,"Indicates if vendor is ""white listed"" or pre-approved.",Contains attributes that identify and describe vendors or suppliers.,No,nvarchar,No,No

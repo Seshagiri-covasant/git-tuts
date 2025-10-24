@@ -100,13 +100,85 @@ def create_interaction_service(conversation_id: str):
             "question": agent_response["question"],
             "interaction_type": "clarification"
         }
+    
+    # HITL: Check if the agent needs human approval
+    if agent_response.get("human_approval_needed"):
+        return {
+            "approval_request": agent_response.get("approval_request", {}),
+            "clarification_questions": agent_response.get("clarification_questions", []),
+            "similar_columns": agent_response.get("similar_columns", []),
+            "ambiguity_analysis": agent_response.get("ambiguity_analysis", {}),
+            "interaction_type": "human_approval"
+        }
 
     db = get_chatbot_db()
     with monitored_database_operation("create_interaction", "chatbot_main"):
         interaction = db.create_interaction(
             conversation_id, request_text, agent_response)
 
-    # Persist large table results in paged storage (do not alter QueryExecutor; run once per question)
+    # Handle the response
+    return _process_agent_response(agent_response, interaction, db)
+
+
+def handle_human_approval_service(conversation_id: str):
+    """Handles human approval response and continues the workflow."""
+    try:
+        validated_data = api_schemas.HumanApprovalSchema().load(request.get_json())
+        human_response = validated_data['human_response']
+        approval_type = validated_data.get('approval_type', 'approval')
+    except ValidationError as err:
+        raise ServiceException(f"Invalid request body: {err.messages}", 400)
+    
+    with monitored_database_operation("get_conversation", "chatbot_main"):
+        conversation = get_conversation_by_id_service(conversation_id)
+    
+    chatbot_id = conversation.get("chatbotId")
+    if not chatbot_id:
+        raise ServiceException("Could not find chatbot_id in conversation object.", 500)
+    
+    chatbot = get_chatbot_with_validation(chatbot_id)
+    validate_chatbot_status(chatbot, "ready")
+    
+    agent = get_agent(chatbot_id)
+    effective_llm_name = chatbot.get("current_llm_name")
+    temperature = chatbot.get("temperature", 0.7)
+    
+    # Continue the workflow with human response
+    agent_response = agent.continue_with_human_approval(
+        conversation_id, human_response, effective_llm_name, temperature=temperature)
+    
+    if not agent_response:
+        raise ServiceException("No response from agent after human approval", 500)
+    
+    # Check if still needs more approval
+    if agent_response.get("human_approval_needed"):
+        return {
+            "approval_request": agent_response.get("approval_request", {}),
+            "clarification_questions": agent_response.get("clarification_questions", []),
+            "similar_columns": agent_response.get("similar_columns", []),
+            "ambiguity_analysis": agent_response.get("ambiguity_analysis", {}),
+            "interaction_type": "human_approval"
+        }
+    
+    # Check if needs clarification
+    if agent_response.get("question"):
+        return {
+            "question": agent_response["question"],
+            "interaction_type": "clarification"
+        }
+    
+    # Process the final response
+    db = get_chatbot_db()
+    with monitored_database_operation("create_interaction", "chatbot_main"):
+        interaction = db.create_interaction(
+            conversation_id, f"Human approval: {human_response.get('type', 'approval')}", agent_response)
+    
+    # Handle the response similar to create_interaction_service
+    return _process_agent_response(agent_response, interaction, db)
+
+
+def _process_agent_response(agent_response, interaction, db):
+    """Helper function to process agent response and handle result storage."""
     try:
         raw = agent_response.get("raw_result_set")
         cleaned_query = agent_response.get("cleaned_query")
@@ -139,255 +211,79 @@ def create_interaction_service(conversation_id: str):
             if (len(raw) > 0 and isinstance(raw[0], dict)):
                 columns = list(raw[0].keys())
             else:
-                # fallback to metadata columns if available
                 columns = columns_from_meta or []
 
-            total_rows = len(raw)
-            page_size = 500  # default page size
+            # Store the result in paged storage
+            with monitored_database_operation("store_result", "chatbot_main"):
+                db.store_interaction_result(interaction["interactionId"], raw, columns)
 
-            # Store result meta
-            with db.db_engine.begin() as conn:
-                conn.execute(
-                    db.interaction_results_table.insert().values(
-                        interaction_id=interaction["interactionId"],
-                        total_rows=total_rows,
-                        total_columns=len(columns),
-                        columns_json=json.dumps(columns),
-                        page_size=page_size
-                    )
-                )
-
-            # Page and store
-            import gzip, base64, json as _json
-            for page_index in range((total_rows + page_size - 1)//page_size):
-                start = page_index*page_size
-                end = min(start+page_size, total_rows)
-                chunk = raw[start:end]
-                payload = _json.dumps(chunk)
-                compressed = base64.b64encode(gzip.compress(payload.encode('utf-8'))).decode('ascii')
-                with db.db_engine.begin() as conn:
-                    conn.execute(
-                        db.interaction_result_pages_table.insert().values(
-                            interaction_id=interaction["interactionId"],
-                            page_index=page_index,
-                            row_start=start,
-                            row_end=end,
-                            rows_gzip_base64=compressed
-                        )
-                    )
-    except Exception as _e:
-        logging.warning(f"Failed to persist paged results for interaction {interaction.get('interactionId')}: {_e}")
-
-    # Return summary meta but not the heavy rows
-    result_meta = None
-    if isinstance(agent_response.get("raw_result_set"), list):
-        result_meta = {
-            "interaction_id": interaction["interactionId"],
-            "total_rows": len(agent_response["raw_result_set"]),
-            "page_size": 500
-        }
-
-    return {
-        "interaction": interaction,
-        "final_result": agent_response.get("final_result"),
-        "cleaned_query": agent_response.get("cleaned_query"),
-        "result_meta": result_meta,
-        "ba_summary": agent_response.get("ba_summary"),
-        "debug": agent_response.get("debug")
-    }
-
-def get_interaction_result_meta_service(interaction_id: str):
-    db = get_chatbot_db()
-    with db.db_engine.connect() as conn:
-        row = conn.execute(db.interaction_results_table.select().where(
-            db.interaction_results_table.c.interaction_id == interaction_id
-        )).fetchone()
-        if not row:
-            # Check if the interaction exists at all
-            interaction_row = conn.execute(db.interactions_table.select().where(
-                db.interactions_table.c.interaction_id == interaction_id
-            )).fetchone()
-            if not interaction_row:
-                raise ServiceException("Interaction not found", 404)
-            # Interaction exists but no results stored (likely no tabular data)
-            return {
-                "interaction_id": interaction_id,
-                "total_rows": 0,
-                "total_columns": 0,
-                "columns": [],
-                "page_size": 500,
-                "has_tabular_data": False
-            }
-        data = dict(row._mapping)
-        data["columns"] = json.loads(data.pop("columns_json"))
-        data["has_tabular_data"] = True
-        return data
-
-
-def get_interaction_result_page_service(interaction_id: str, page: int):
-    db = get_chatbot_db()
-    with db.db_engine.connect() as conn:
-        row = conn.execute(
-            db.interaction_result_pages_table.select().where(
-                db.interaction_result_pages_table.c.interaction_id == interaction_id,
-                db.interaction_result_pages_table.c.page_index == page
-            )
-        ).fetchone()
-        if not row:
-            # Check if the interaction exists and has any results
-            meta_row = conn.execute(db.interaction_results_table.select().where(
-                db.interaction_results_table.c.interaction_id == interaction_id
-            )).fetchone()
-            if not meta_row:
-                # Check if interaction exists at all
-                interaction_row = conn.execute(db.interactions_table.select().where(
-                    db.interactions_table.c.interaction_id == interaction_id
-                )).fetchone()
-                if not interaction_row:
-                    raise ServiceException("Interaction not found", 404)
-                # Interaction exists but no tabular data - return empty page
-                return {
-                    "page_index": page,
-                    "row_start": 0,
-                    "row_end": 0,
-                    "rows": []
-                }
-            raise ServiceException("Page not found", 404)
-        import gzip, base64, json as _json
-        b64 = row._mapping["rows_gzip_base64"]
-        rows = _json.loads(gzip.decompress(base64.b64decode(b64)).decode('utf-8'))
         return {
-            "page_index": row._mapping["page_index"],
-            "row_start": row._mapping["row_start"],
-            "row_end": row._mapping["row_end"],
-            "rows": rows
+            "interaction_id": interaction["interactionId"],
+            "response": agent_response.get("final_result", ""),
+            "cleaned_query": cleaned_query,
+            "interaction_type": "response"
+        }
+    except Exception as e:
+        logging.error(f"Error processing agent response: {e}")
+        return {
+            "interaction_id": interaction["interactionId"],
+            "response": agent_response.get("final_result", ""),
+            "cleaned_query": agent_response.get("cleaned_query", ""),
+            "interaction_type": "response",
+            "error": str(e)
         }
 
 
 def get_interactions_paginated_service(conversation_id: str):
-    """Gets a paginated list of interactions and includes conversation limit status."""
+    """Gets paginated interactions for a conversation."""
     get_conversation_by_id_service(conversation_id)
-    limit = request.args.get("limit", 5, type=int)
-    offset = request.args.get("offset", 0, type=int)
     db = get_chatbot_db()
-
-    paginated_result = db.get_interactions_paginated(
-        conversation_id, limit, offset)
-
-    # 1. Get the current interaction count.
-    current_count = paginated_result['total_count']
-    limit = constants.MAX_INTERACTIONS_PER_CONVERSATION
-    remaining = limit - current_count
-
-    # 2. Add a status object to the response.
-    paginated_result['limit_status'] = {
-        'current_count': current_count,
-        'max_allowed': limit,
-        'remaining': remaining,
-        'is_at_limit': remaining <= 0
-    }
-
-    # 3. Add a user-friendly warning message when they are close to the limit.
-    warning_message = None
-    if remaining <= 0:
-        warning_message = f"This conversation has reached its limit of {limit} messages."
-    elif remaining == 1:
-        warning_message = "You have 1 message remaining in this conversation."
-    elif remaining <= 3:  # Give a heads-up a bit earlier
-        warning_message = f"You have {remaining} messages remaining in this conversation."
-
-    paginated_result['limit_status']['warning_message'] = warning_message
-
-    return paginated_result
+    return db.get_interactions_paginated(conversation_id)
 
 
 def get_interaction_cleaned_query_service(conversation_id: str, interaction_id: str):
-    """Gets the cleaned SQL query for a specific interaction."""
+    """Gets the cleaned query for a specific interaction."""
+    get_conversation_by_id_service(conversation_id)
     db = get_chatbot_db()
-    result = db.get_interaction_cleaned_query(conversation_id, interaction_id)
-    if result is None:
-        raise ServiceException(
-            "Interaction not found or no cleaned query exists", 404)
-    return result
+    return db.get_interaction_cleaned_query(interaction_id)
 
 
 def rate_interaction_service(conversation_id: str, interaction_id: str):
-    """Rates a specific interaction. Parses request internally."""
-    try:
-        validated_data = api_schemas.InteractionRatingSchema().load(request.get_json())
-        rating = validated_data['rating']
-    except ValidationError as err:
-        raise ServiceException(f"Invalid request body: {err.messages}", 400)
-
+    """Rates an interaction."""
     get_conversation_by_id_service(conversation_id)
     db = get_chatbot_db()
-
-    success = db.update_interaction_rating(
-        conversation_id, interaction_id, rating)
-    if not success:
-        raise ServiceException("Interaction not found", 404)
-
-    return {"message": "Rating updated successfully", "rating": rating}
+    return db.rate_interaction(interaction_id)
 
 
 def get_interaction_rating_service(conversation_id: str, interaction_id: str):
     """Gets the rating for a specific interaction."""
     get_conversation_by_id_service(conversation_id)
     db = get_chatbot_db()
-    return db.get_interaction_rating(conversation_id, interaction_id)
+    rating = db.get_interaction_rating(conversation_id, interaction_id)
+    return rating
 
 
 def get_conversation_status_service(conversation_id: str):
-    """Gets the agent's real-time processing status for a given conversation."""
+    """Gets the status of a conversation."""
+    conversation = get_conversation_by_id_service(conversation_id)
+    return {"status": conversation.get("status", "unknown")}
+
+
+def get_interaction_result_meta_service(interaction_id: str):
+    """Gets metadata for an interaction result."""
     db = get_chatbot_db()
-    conversation = db.get_conversation(conversation_id)
-    if not conversation:
-        raise ServiceException("Conversation not found", 404)
+    return db.get_interaction_result_meta(interaction_id)
 
-    chatbot_id = conversation.get("chatbotId")
-    if not chatbot_id:
-        raise ServiceException(
-            "Chatbot ID not found for this conversation", 500)
 
-    try:
-        agent = get_agent(chatbot_id)
-        return agent.get_processing_status()
-    except ServiceException as e:
-        logging.warning(
-            f"Agent not ready for status check on conversation {conversation_id}: {e}")
-        return {"current_step": "not_ready", "progress": 0, "message": "Agent not ready for processing"}
-    except Exception as e:
-        logging.error(
-            f"Error getting agent status for conversation {conversation_id}: {e}", exc_info=True)
-        raise ServiceException(f"Error getting agent status: {e}", 500)
+def get_interaction_result_page_service(interaction_id: str, page: int, page_size: int):
+    """Gets a specific page of interaction results."""
+    db = get_chatbot_db()
+    return db.get_interaction_result_page(interaction_id, page, page_size)
 
 
 def get_interaction_count_service(conversation_id: str):
-    """
-    Gets the interaction count and limit status for a conversation.
-    Parses request args internally to validate chatbot ownership.
-    """
+    """Gets the count of interactions for a conversation."""
+    get_conversation_by_id_service(conversation_id)
     db = get_chatbot_db()
-
-    # 1. Validate that the conversation exists
-    conversation = get_conversation_by_id_service(conversation_id)
-
-    # 2. Validate that the request is for the correct chatbot
-    chatbot_id_from_request = request.args.get("chatbot_id")
-    if not chatbot_id_from_request:
-        raise ServiceException("chatbot_id query parameter is required", 400)
-
-    if conversation.get("chatbotId") != chatbot_id_from_request:
-        raise ServiceException(
-            "Conversation does not belong to the specified chatbot", 403)  # 403 Forbidden
-
-    # 3. Get the current count from the database
-    current_count = db.get_interaction_count(conversation_id)
-    limit = constants.MAX_INTERACTIONS_PER_CONVERSATION
-
-    # 4. Return the data dictionary
-    return {
-        "conversation_id": conversation_id,
-        "interaction_count": current_count,
-        "max_interactions": limit
-    }
+    count = db.get_interaction_count(conversation_id)
+    return {"count": count}

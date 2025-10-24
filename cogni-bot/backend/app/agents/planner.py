@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import TypedDict, List, Dict, Any
 from .domain_error_response import DomainErrorResponseAgent
+from .human_approval_agent import HumanApprovalAgent
 
 class CustomState(TypedDict):
     messages: List[Any]
@@ -23,10 +24,18 @@ class CustomState(TypedDict):
     query: str
     final_sql: str
     forbidden_sql: bool
+    # Human approval fields
+    human_approval_needed: bool
+    intent_approved: bool
+    approval_request: Dict[str, Any]
+    clarification_questions: List[Dict[str, Any]]
+    similar_columns: List[Dict[str, Any]]
+    ambiguity_analysis: Dict[str, Any]
+    human_response: Dict[str, Any]
 
 
 class Planner:
-    def __init__(self, domain_relevance_checker, intent_picker, query_clarification, context_clipper, query_gen, query_clean, query_validator, query_exec, rephraser, checkpoint: SqliteSaver, app_db_util=None, chatbot_db_util=None, chatbot_id: str | None = None, conversational_intent_analyzer=None):
+    def __init__(self, domain_relevance_checker, intent_picker, query_clarification, context_clipper, query_gen, query_clean, query_validator, query_exec, rephraser, checkpoint: SqliteSaver, app_db_util=None, chatbot_db_util=None, chatbot_id: str | None = None, conversational_intent_analyzer=None, human_approval_agent=None):
         self.app_db_util = app_db_util  # For application DB operations
         # For chatbot-related data (chat_bot.db)
         self.chatbot_db_util = chatbot_db_util
@@ -42,6 +51,7 @@ class Planner:
         self.workflow.add_node("Domain_Error_Response", domain_error_response.run)
         self.workflow.add_node("Intent_Picker", lambda state: intent_picker.run(state))
         self.workflow.add_node("Conversational_Intent_Analyzer", lambda state: self._run_conversational_intent_analyzer(state, conversational_intent_analyzer))
+        self.workflow.add_node("Human_Approval", lambda state: self._run_human_approval(state, human_approval_agent))
         self.workflow.add_node("Query_Clarification", lambda state: query_clarification.run(state))  # Use existing query_clarification
         self.workflow.add_node("Context_Clipper", lambda state: context_clipper.run(state))
         self.workflow.add_node("Query_Generator", lambda state: query_gen.run(
@@ -67,9 +77,16 @@ class Planner:
             return "Conversational_Intent_Analyzer"
 
         def route_after_conversational_intent(state):
-            """After conversational analysis, go to Query_Clarification."""
-            print(f"[Planner] Routing after Conversational_Intent_Analyzer to Query_Clarification")
-            return "Query_Clarification"
+            """After conversational analysis, go to Human_Approval."""
+            print(f"[Planner] Routing after Conversational_Intent_Analyzer to Human_Approval")
+            return "Human_Approval"
+        
+        def route_after_human_approval(state):
+            """After human approval, check if approval is needed or proceed."""
+            if state.get("human_approval_needed", False):
+                return END  # Stop workflow, return approval request to user
+            else:
+                return "Query_Clarification"
 
         def route_after_query_clarification(state):
             if state.get("clarification_needed", False):
@@ -82,6 +99,7 @@ class Planner:
         self.workflow.add_edge("Domain_Error_Response", END)
         self.workflow.add_conditional_edges("Intent_Picker", route_after_intent)
         self.workflow.add_conditional_edges("Conversational_Intent_Analyzer", route_after_conversational_intent)
+        self.workflow.add_conditional_edges("Human_Approval", route_after_human_approval)
         self.workflow.add_conditional_edges("Query_Clarification", route_after_query_clarification)
         self.workflow.add_edge("Context_Clipper", "Query_Generator")
         self.workflow.add_edge("Query_Generator", "Query_Cleaner")
@@ -101,6 +119,17 @@ class Planner:
             return result
         else:
             print(f"[Planner] No conversational_intent_analyzer provided, skipping")
+            return state
+    
+    def _run_human_approval(self, state, human_approval_agent):
+        """Helper method to run Human_Approval with debug logging."""
+        print(f"[Planner] About to run Human_Approval")
+        if human_approval_agent:
+            result = human_approval_agent.run(state)
+            print(f"[Planner] Human_Approval completed, human_approval_needed: {result.get('human_approval_needed', False)}")
+            return result
+        else:
+            print(f"[Planner] No human_approval_agent provided, skipping")
             return state
 
     def _run_query_clarification(self, state, query_clarification):

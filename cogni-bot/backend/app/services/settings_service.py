@@ -303,7 +303,9 @@ def update_chatbot_ai_settings_service(chatbot_id, data):
         if not chatbot:
             raise ServiceException("Chatbot not found", 404)
         
+        # Use provided llm_name, or existing current_llm_name, or default to COHERE
         llm_name = (data.get('llm_name') or chatbot.get('current_llm_name') or 'COHERE').upper()
+        logger.info(f"Settings service: Using LLM name '{llm_name}' for chatbot {chatbot_id}")
         api_key_source = data.get('api_key_source', 'env')
         local_api_key = data.get('local_api_key', '')
         

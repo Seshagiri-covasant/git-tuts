@@ -66,6 +66,11 @@ class InteractionCreateSchema(Schema):
 class InteractionRatingSchema(Schema):
     rating = fields.Integer(required=True, validate=validate.OneOf([1, -1]))
 
+
+class HumanApprovalSchema(Schema):
+    human_response = fields.Dict(required=True, description="Human response to approval request")
+    approval_type = fields.String(required=False, missing="approval", validate=validate.OneOf(["approval", "clarification", "modification"]))
+
 # --- Template Schemas ---
 
 

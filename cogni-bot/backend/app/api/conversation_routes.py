@@ -40,6 +40,12 @@ def create_interaction(conversation_id):
     return jsonify({"message": "Query processed successfully", **result}), 201
 
 
+@app.route("/conversations/<conversation_id>/human-approval", methods=["POST"])
+def handle_human_approval(conversation_id):
+    result = conversation_service.handle_human_approval_service(conversation_id)
+    return jsonify({"message": "Human approval processed successfully", **result}), 200
+
+
 @app.route("/conversations/<conversation_id>/interactions", methods=["GET"])
 def get_interactions(conversation_id):
     interactions = conversation_service.get_interactions_paginated_service(

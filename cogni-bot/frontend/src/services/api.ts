@@ -318,7 +318,7 @@ export const updateLLMSettings = async (chatbotId:any, llmName:any, temperature?
 
 // Schema Management
 export const getChatbotSchema = async (chatbotId:any) => {
-  return api.get(`/api/chatbots/${chatbotId}/schema`);
+  return api.get(`/api/chatbots/${chatbotId}/semantic-schema`);
 };
 
 // Template Management
@@ -518,6 +518,25 @@ export const updateKnowledgeBaseSettings = async (chatbotId: string, knowledgeBa
   knowledge_base_file?: string;
 }) => {
   return api.post(`/api/chatbots/${chatbotId}/knowledge-base`, knowledgeBaseData);
+};
+
+// Human Approval Management
+export const handleHumanApproval = async (conversationId: string, humanResponse: {
+  type: 'approval' | 'clarification' | 'modification';
+  clarifications?: Record<string, any>;
+  modified_intent?: Record<string, any>;
+  selected_columns?: string[];
+  business_context?: Record<string, any>;
+}, approvalType: string = 'approval') => {
+  try {
+    const response = await api.post(`/api/conversations/${conversationId}/human-approval`, {
+      human_response: humanResponse,
+      approval_type: approvalType
+    });
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 export default api; 

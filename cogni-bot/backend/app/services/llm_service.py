@@ -30,7 +30,9 @@ def configure_llm_service(chatbot_id: str):
     if 'temperature' in data and data['temperature'] is not None:
         update_params["temperature"] = data['temperature']
 
+    print(f"[LLM Service] Configuring LLM for chatbot {chatbot_id}: {data['llm_name']}")
     updated_chatbot = db.update_chatbot(**update_params)
+    print(f"[LLM Service] Updated chatbot LLM: {updated_chatbot['current_llm_name']}")
     return {"llm_name": updated_chatbot['current_llm_name'], "temperature": updated_chatbot.get('temperature', 0.7)}
 
 

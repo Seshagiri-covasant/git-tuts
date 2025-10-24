@@ -2,7 +2,7 @@ import logging
 from urllib.parse import quote_plus
 import time
 import json
-from flask import app, current_app, request
+from flask import current_app, request
 from marshmallow import ValidationError
 
 from ..schemas.semantic_models import DatabaseSchema
@@ -60,12 +60,16 @@ def get_all_chatbots_service():
         created_at_iso = p.get("created_at").isoformat() if p.get(
             "created_at") else None
 
+        # Debug: Log what LLM name is being returned
+        current_llm = p.get("current_llm_name")
+        print(f"[Chatbot Service] Chatbot {p['chatbot_id']} ({p['name']}): current_llm_name = '{current_llm}'")
+        
         result.append({
             "chatbot_id": p["chatbot_id"],
             "name": p["name"],
             "status": p.get("status"),
             "created_at": created_at_iso,
-            "llm_name": p.get("current_llm_name"),
+            "llm_name": current_llm,
             "temperature": p.get("temperature"),
             "db_type": p.get("db_type"),
         "db_url": p.get("db_url"),
@@ -560,11 +564,34 @@ def get_semantic_schema_service(chatbot_id: str):
     if not semantic_schema_json:
         raise ServiceException(
             "No semantic schema found for this chatbot", 404)
+    
+    # 🔍 DEBUG: Log the raw JSON to see what's being loaded
+    print(f"🔍 RAW SCHEMA JSON: {semantic_schema_json[:500]}...")
+    print(f"🔍 SCHEMA JSON LENGTH: {len(semantic_schema_json)}")
 
     try:
         # Parse the JSON string first, then validate with Pydantic
         import json
         semantic_schema_data = json.loads(semantic_schema_json)
+        
+        # 🔍 DEBUG: Check what priority fields are in the loaded schema
+        print("🔍 LOADED SCHEMA DEBUG: Checking loaded schema for priority fields...")
+        for table_name, table_data in semantic_schema_data.get('tables', {}).items():
+            if isinstance(table_data, dict) and 'columns' in table_data:
+                for col_name, col_data in table_data['columns'].items():
+                    if isinstance(col_data, dict):
+                        priority_fields = {
+                            'priority': col_data.get('priority'),
+                            'description': col_data.get('description'),
+                            'business_context': col_data.get('business_context'),
+                            'business_terms': col_data.get('business_terms'),
+                            'is_preferred': col_data.get('is_preferred'),
+                            'use_cases': col_data.get('use_cases'),
+                            'relevance_keywords': col_data.get('relevance_keywords')
+                        }
+                        # Only log if any priority fields are present
+                        if any(priority_fields.values()):
+                            print(f"🔍 LOADED PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
 
         # ---------------- Normalization for legacy/new mixed schemas ---------------- #
         def _normalize_inbound_schema(data: dict) -> dict:
@@ -737,6 +764,44 @@ def update_semantic_schema_service(chatbot_id: str):
     print(f"Metrics: {len(semantic_schema_data.get('metrics', []))}")
     print(f"Metrics data: {semantic_schema_data.get('metrics', [])}")
     
+    # 🔍 LOG PRIORITY FIELDS: Check for priority fields in incoming schema
+    print("🔍 PRIORITY FIELDS DEBUG: Checking incoming schema for priority fields...")
+    print(f"🔍 SCHEMA KEYS: {list(semantic_schema_data.keys())}")
+    print(f"🔍 TABLES COUNT: {len(semantic_schema_data.get('tables', {}))}")
+    
+    priority_fields_found = False
+    for table_name, table_data in semantic_schema_data.get('tables', {}).items():
+        if isinstance(table_data, dict) and 'columns' in table_data:
+            print(f"🔍 TABLE {table_name}: {len(table_data['columns'])} columns")
+            for col_name, col_data in table_data['columns'].items():
+                if isinstance(col_data, dict):
+                    priority_fields = {
+                        'priority': col_data.get('priority'),
+                        'description': col_data.get('description'),
+                        'business_context': col_data.get('business_context'),
+                        'business_terms': col_data.get('business_terms'),
+                        'is_preferred': col_data.get('is_preferred'),
+                        'use_cases': col_data.get('use_cases'),
+                        'relevance_keywords': col_data.get('relevance_keywords')
+                    }
+                    # Only log if any priority fields are present
+                    if any(priority_fields.values()):
+                        print(f"🔍 PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+                        priority_fields_found = True
+    
+    if not priority_fields_found:
+        print("🔍 NO PRIORITY FIELDS FOUND IN INCOMING SCHEMA!")
+        print("🔍 This means the frontend is not sending priority fields")
+        
+        # Show sample column data to debug
+        for table_name, table_data in semantic_schema_data.get('tables', {}).items():
+            if isinstance(table_data, dict) and 'columns' in table_data:
+                sample_col = list(table_data['columns'].items())[0] if table_data['columns'] else None
+                if sample_col:
+                    col_name, col_data = sample_col
+                    print(f"🔍 SAMPLE COLUMN {table_name}.{col_name}: {list(col_data.keys())}")
+                    break
+    
     # Log business metrics being updated
     for metric in semantic_schema_data.get('metrics', []):
         print(f"  Metric: {metric.get('name', 'Unknown')} = {metric.get('expression', 'No expression')}")
@@ -813,8 +878,44 @@ def update_semantic_schema_service(chatbot_id: str):
 
         semantic_schema_data = _normalize_inbound_schema(semantic_schema_data)
 
+        # 🔍 DEBUG: Check what priority fields are in the data before validation
+        print("🔍 PRE-VALIDATION DEBUG: Checking priority fields before Pydantic validation...")
+        for table_name, table_data in semantic_schema_data.get('tables', {}).items():
+            if isinstance(table_data, dict) and 'columns' in table_data:
+                for col_name, col_data in table_data['columns'].items():
+                    if isinstance(col_data, dict):
+                        priority_fields = {
+                            'priority': col_data.get('priority'),
+                            'description': col_data.get('description'),
+                            'business_context': col_data.get('business_context'),
+                            'business_terms': col_data.get('business_terms'),
+                            'is_preferred': col_data.get('is_preferred'),
+                            'use_cases': col_data.get('use_cases'),
+                            'relevance_keywords': col_data.get('relevance_keywords')
+                        }
+                        # Only log if any priority fields are present
+                        if any(priority_fields.values()):
+                            print(f"🔍 PRE-VALIDATION PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+        
         semantic_schema = DatabaseSchema.model_validate(semantic_schema_data)
         logger.info(f"Schema validation successful for chatbot {chatbot_id}")
+        
+        # 🔍 DEBUG: Check what priority fields are in the validated model
+        print("🔍 POST-VALIDATION DEBUG: Checking priority fields after Pydantic validation...")
+        for table_name, table_data in semantic_schema.tables.items():
+            for col_name, col_data in table_data.columns.items():
+                priority_fields = {
+                    'priority': getattr(col_data, 'priority', None),
+                    'description': getattr(col_data, 'description', None),
+                    'business_context': getattr(col_data, 'business_context', None),
+                    'business_terms': getattr(col_data, 'business_terms', None),
+                    'is_preferred': getattr(col_data, 'is_preferred', None),
+                    'use_cases': getattr(col_data, 'use_cases', None),
+                    'relevance_keywords': getattr(col_data, 'relevance_keywords', None)
+                }
+                # Only log if any priority fields are present
+                if any(priority_fields.values()):
+                    print(f"🔍 POST-VALIDATION PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
         
         # Enforce business rule: the schema's ID must match the chatbot's ID
         if semantic_schema.id != chatbot_id:
@@ -850,6 +951,29 @@ def update_semantic_schema_service(chatbot_id: str):
         # 🔍 LOGGING: Track database storage result
         if success:
             print(f"✅ Schema successfully updated in database for chatbot {chatbot_id}")
+            
+            # 🔍 LOG PRIORITY FIELDS: Verify what was actually stored
+            print("🔍 PRIORITY FIELDS DEBUG: Verifying stored schema contains priority fields...")
+            try:
+                stored_schema = json.loads(semantic_schema_json)
+                for table_name, table_data in stored_schema.get('tables', {}).items():
+                    if isinstance(table_data, dict) and 'columns' in table_data:
+                        for col_name, col_data in table_data['columns'].items():
+                            if isinstance(col_data, dict):
+                                priority_fields = {
+                                    'priority': col_data.get('priority'),
+                                    'description': col_data.get('description'),
+                                    'business_context': col_data.get('business_context'),
+                                    'business_terms': col_data.get('business_terms'),
+                                    'is_preferred': col_data.get('is_preferred'),
+                                    'use_cases': col_data.get('use_cases'),
+                                    'relevance_keywords': col_data.get('relevance_keywords')
+                                }
+                                # Only log if any priority fields are present
+                                if any(priority_fields.values()):
+                                    print(f"🔍 STORED PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+            except Exception as e:
+                print(f"🔍 ERROR: Could not verify stored priority fields: {e}")
         else:
             print(f"❌ Failed to update schema in database for chatbot {chatbot_id}")
         
@@ -1116,6 +1240,7 @@ def import_semantic_schema_service(chatbot_id: str):
             if table_name not in imported_data:
                 imported_data[table_name] = {}
             
+            # Store description and business_context as requested
             imported_data[table_name][column_name] = {
                 'description': description,
                 'business_context': business_context,
@@ -1185,8 +1310,14 @@ def import_semantic_schema_service(chatbot_id: str):
                     if column_entry:
                         col_id, col = column_entry
                         # Update the column with imported data
-                        col['description'] = column_data['description']
-                        col['business_context'] = column_data['business_context']
+                        # Map description from Excel to description field in schema
+                        if column_data['description']:
+                            col['description'] = column_data['description']
+                        
+                        # Map business_context from Excel to business_context field in schema  
+                        if column_data['business_context']:
+                            col['business_context'] = column_data['business_context']
+                        # Add exclude_column field
                         col['exclude_column'] = column_data['exclude_column']
                         updated = True
                         logger.info(f"Updated column {col_id} in table {table_id} with imported data:")
@@ -1210,9 +1341,13 @@ def import_semantic_schema_service(chatbot_id: str):
             db.store_semantic_schema(chatbot_id, updated_schema_json)
             
             # Debug: Verify what was actually saved
-            logger.info("Verifying saved schema contains business_context fields:")
+            logger.info("Verifying saved schema contains description and business_context fields:")
             for table_id, table in semantic_schema_data.get('tables', {}).items():
                 for col_id, col in table.get('columns', {}).items():
+                    if col.get('description'):
+                        logger.info(f"  {table_id}.{col_id}: description='{col.get('description')}'")
+                    else:
+                        logger.warning(f"  {table_id}.{col_id}: NO description field")
                     if col.get('business_context'):
                         logger.info(f"  {table_id}.{col_id}: business_context='{col.get('business_context')}'")
                     else:
@@ -1223,18 +1358,26 @@ def import_semantic_schema_service(chatbot_id: str):
             if payments_table:
                 additional_payment_col = payments_table.get('columns', {}).get('AdditionalPaymentID', {})
                 logger.info(f"AdditionalPaymentID column details: {additional_payment_col}")
+                if additional_payment_col.get('description'):
+                    logger.info(f"AdditionalPaymentID has description: '{additional_payment_col.get('description')}'")
+                else:
+                    logger.warning("AdditionalPaymentID does NOT have description field")
                 if additional_payment_col.get('business_context'):
                     logger.info(f"AdditionalPaymentID has business_context: '{additional_payment_col.get('business_context')}'")
                 else:
                     logger.warning("AdditionalPaymentID does NOT have business_context field")
             
-            # Debug: Check a few random columns to see if business_context is present
-            logger.info("Checking random columns for business_context:")
+            # Debug: Check a few random columns to see if description and business_context are present
+            logger.info("Checking random columns for description and business_context:")
             for table_id, table in semantic_schema_data.get('tables', {}).items():
                 columns = table.get('columns', {})
                 sample_cols = list(columns.keys())[:3]  # Check first 3 columns
                 for col_id in sample_cols:
                     col = columns[col_id]
+                    if col.get('description'):
+                        logger.info(f"  {table_id}.{col_id}: description='{col.get('description')}'")
+                    else:
+                        logger.warning(f"  {table_id}.{col_id}: NO description field")
                     if col.get('business_context'):
                         logger.info(f"  {table_id}.{col_id}: business_context='{col.get('business_context')}'")
                     else:

@@ -582,10 +582,6 @@ COMPLEX AGGREGATION PATTERNS:
 - For comparisons (vs, versus): Use GROUP BY with the comparison column
 - For breakdowns: Use GROUP BY with appropriate categorical columns
 
-EXAMPLE PATTERNS:
-- "What percentage of X are Y vs Z?" → WITH threshold AS (SELECT AVG(score) FROM table), SELECT category, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS percentage FROM table, threshold WHERE score > threshold.avg GROUP BY category
-- "High-risk payments by type" → WITH avg_risk AS (SELECT AVG(risk_score) FROM payments), SELECT payment_type, COUNT(*) FROM payments, avg_risk WHERE risk_score > avg_risk.avg GROUP BY payment_type
-
 Generate the SQL query:"""
 
             # LOGGING: What data is being sent to LLM

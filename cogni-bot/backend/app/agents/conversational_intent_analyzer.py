@@ -51,7 +51,7 @@ class ConversationalIntentAnalyzer:
             
             # Determine what to do based on conversation phase
             if self.conversation_phase == "initial":
-                return self._handle_initial_question(user_question, conversation_context, knowledge_data)
+                return self._handle_initial_question(user_question, conversation_context, knowledge_data, state)
             elif self.conversation_phase == "gathering":
                 return self._handle_follow_up_question(user_question, conversation_context, knowledge_data)
             elif self.conversation_phase == "summarizing":
@@ -76,7 +76,7 @@ class ConversationalIntentAnalyzer:
                 'error': str(e)
             }
     
-    def _handle_initial_question(self, user_question: str, conversation_context: str, knowledge_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_initial_question(self, user_question: str, conversation_context: str, knowledge_data: Dict[str, Any], state: Dict[str, Any] = None) -> Dict[str, Any]:
         """Handle the initial user question."""
         print(f"[ConversationalIntentAnalyzer] Handling initial question")
         
@@ -113,24 +113,31 @@ class ConversationalIntentAnalyzer:
         print(f"{knowledge_overview}")
         print(f"{'='*80}\n")
         
-        # Check for column ambiguity before LLM analysis (only for very ambiguous cases)
-        column_ambiguity = self._detect_column_ambiguity(user_question, knowledge_data)
-        print(f"[ConversationalIntentAnalyzer] Column ambiguity check: needs_clarification={column_ambiguity.get('needs_clarification', False)}, options_count={len(column_ambiguity.get('options', []))}")
+        # Skip column ambiguity check for now - let the workflow proceed to SQL generation
+        # The Intent Picker has already made the correct choice with high confidence
+        print(f"[ConversationalIntentAnalyzer] Skipping column ambiguity check - Intent Picker already made correct choice")
         
-        if column_ambiguity.get('needs_clarification', False):
-            # Ask for clarification if there are 2+ relevant columns (any ambiguity)
-            if len(column_ambiguity.get('options', [])) >= 2:
-                print(f"[ConversationalIntentAnalyzer] Column ambiguity detected with {len(column_ambiguity.get('options', []))} options, asking user to clarify")
-                return {
-                    'clarification_needed': True,
-                    'clarification_question': column_ambiguity['clarification_question'],
-                    'ambiguity_type': column_ambiguity['ambiguity_type'],
-                    'options': column_ambiguity['options'],
-                    'conversation_phase': 'clarification_needed'
-                }
-            else:
-                print(f"[ConversationalIntentAnalyzer] Column ambiguity detected but only {len(column_ambiguity.get('options', []))} options, proceeding with intelligent selection")
+        # Get the intent from Intent Picker if available
+        intent_from_picker = state.get('intent', {}) if state else {}
+        if intent_from_picker:
+            print(f"[ConversationalIntentAnalyzer] Using Intent Picker's choice: {intent_from_picker}")
+            # Use the Intent Picker's choice directly
+            self.requirements_gathered = {
+                "tables": intent_from_picker.get("tables", []),
+                "columns": intent_from_picker.get("columns", []),
+                "filters": intent_from_picker.get("filters", []),
+                "aggregations": intent_from_picker.get("aggregations", []),
+                "time_range": intent_from_picker.get("time_range", ""),
+                "sorting": intent_from_picker.get("sorting", ""),
+                "business_context": intent_from_picker.get("reasoning", "")
+            }
 
+        # Skip LLM analysis if we already have Intent Picker's choice
+        if intent_from_picker:
+            print(f"[ConversationalIntentAnalyzer] Using Intent Picker's choice, skipping LLM analysis")
+            # Create summary and proceed with Intent Picker's choice
+            return self._create_summary(self.requirements_gathered, user_question, knowledge_data)
+        
         # Use LLM to analyze the question and determine what information is needed
         analysis_prompt = f"""You are an expert data analyst having a natural conversation with a user about their data needs.
 
@@ -380,42 +387,55 @@ Be conversational, business-focused, and avoid all technical database terminolog
             
             if question_clarity['is_clear']:
                 # Question is clear, proceed to SQL generation
-                # CRITICAL FIX: Create INTENT message for query generator
-                import json as _json
-                intent_message = f"INTENT:{_json.dumps(self.requirements_gathered)}"
+                # CRITICAL FIX: Preserve the original intent from Intent Picker
+                # Note: state is not available in this method, so we'll use the gathered_info directly
+                original_intent = {}
                 
-                # Add intent message to state for query generator
-                state = {
-                    'clarification_needed': False,
-                    'gathered_info': self.requirements_gathered,
+                print(f"[ConversationalIntentAnalyzer] Original intent from Intent Picker: {original_intent}")
+                print(f"[ConversationalIntentAnalyzer] Gathered info: {self.requirements_gathered}")
+                
+                # Merge with gathered info, but preserve original intent structure
+                merged_intent = {
+                    'tables': original_intent.get('tables', self.requirements_gathered.get('tables', [])),
+                    'columns': original_intent.get('columns', self.requirements_gathered.get('columns', [])),
+                    'filters': original_intent.get('filters', self.requirements_gathered.get('filters', [])),
+                    'aggregations': original_intent.get('aggregations', self.requirements_gathered.get('aggregations', [])),
+                    'time_range': original_intent.get('time_range', self.requirements_gathered.get('time_range', '')),
+                    'sorting': original_intent.get('sorting', self.requirements_gathered.get('sorting', '')),
+                    'reasoning': original_intent.get('reasoning', ''),
+                    'is_follow_up': original_intent.get('is_follow_up', False),
+                    'follow_up_context': original_intent.get('follow_up_context', ''),
+                    'confidence': original_intent.get('confidence', {})
+                }
+                
+                print(f"[ConversationalIntentAnalyzer] Merged intent: {merged_intent}")
+                
+                # Create INTENT message for query generator
+                import json as _json
+                intent_message = f"INTENT:{_json.dumps(merged_intent)}"
+                
+                # Note: state variable is not available in this method scope
+                # We'll create the result_state directly below
+                
+                # Create a new state object with the required information
+                result_state = {
+                    'clarification_needed': False,  # Explicitly set to False for clear questions
+                    'messages': [{
+                        'role': 'system',
+                        'content': intent_message
+                    }],
+                    'agent_thoughts': self._generate_conversational_thoughts(user_question, self.requirements_gathered, summary_data),
+                    'decision_trace': self._build_conversational_decision_trace(user_question, self.requirements_gathered, summary_data),
                     'reasoning': "Question is clear, proceeding to SQL generation",
                     'conversation_phase': 'ready_for_sql',
                     'business_description': summary_data.get('business_description', ''),
                     'data_focus': summary_data.get('data_focus', ''),
                     'criteria': summary_data.get('criteria', ''),
                     'expected_outcome': summary_data.get('expected_outcome', ''),
-                    'intent_message': intent_message  # Add this for query generator
+                    'intent_message': intent_message,
+                    'intent': merged_intent
                 }
-                
-                # Add intent message to messages for query generator to find
-                if 'messages' not in state:
-                    state['messages'] = []
-                state['messages'].append({
-                    'role': 'system',
-                    'content': intent_message
-                })
-                
-                # AGENT THOUGHTS: Internal reasoning process
-                agent_thoughts = self._generate_conversational_thoughts(state.get('user_question', ''), self.requirements_gathered, summary_data)
-                
-                # DECISION TRANSPARENCY: Structured decision trace
-                decision_trace = self._build_conversational_decision_trace(
-                    state.get('user_question', ''), self.requirements_gathered, summary_data
-                )
-                
-                state['agent_thoughts'] = agent_thoughts
-                state['decision_trace'] = decision_trace
-                return state
+                return result_state
             else:
                 # Question needs clarification, use human-in-the-loop validation
                 print(f"[ConversationalIntentAnalyzer] Question needs clarification, triggering human-in-the-loop validation")
@@ -1072,8 +1092,8 @@ Show your actual thought process, not just the final result.
                 "business_context": gathered_info.get('business_context', '')
             },
             "clarity_assessment": {
-                "is_clear": not summary_data.get('clarification_needed', True),
-                "clarification_needed": summary_data.get('clarification_needed', True),
+                "is_clear": not summary_data.get('clarification_needed', False),
+                "clarification_needed": summary_data.get('clarification_needed', False),
                 "business_description": summary_data.get('business_description', ''),
                 "data_focus": summary_data.get('data_focus', ''),
                 "criteria": summary_data.get('criteria', ''),
@@ -1168,9 +1188,9 @@ Show your actual thought process, not just the final result.
         # Override decisions (if any)
         if hasattr(self, 'requirements_gathered') and self.requirements_gathered:
             trace["override_decisions"] = {
-                "llm_clarification_decision": summary_data.get('clarification_needed', True),
-                "internal_clarity_assessment": not summary_data.get('clarification_needed', True),
-                "override_applied": summary_data.get('clarification_needed', True) != (not summary_data.get('clarification_needed', True)),
+                "llm_clarification_decision": summary_data.get('clarification_needed', False),
+                "internal_clarity_assessment": not summary_data.get('clarification_needed', False),
+                "override_applied": summary_data.get('clarification_needed', False) != (not summary_data.get('clarification_needed', False)),
                 "reason": "Internal clarity assessment overrode LLM decision"
             }
         

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
-import { getAllInteractions, createInteraction, getQuery, getConversationStatus, rateInteraction, getInteractionRating, getConversationInteractionCount, getBAInsights, getVisualization, getInteractionResultMeta, getInteractionResultPage } from "../../services/api";
+import { getAllInteractions, createInteraction, getQuery, getConversationStatus, rateInteraction, getInteractionRating, getConversationInteractionCount, getBAInsights, getVisualization, getInteractionResultPage, handleHumanApproval } from "../../services/api";
 import { InteractionResultMeta } from "../../types";
 import { Send, Mic, MicOff, Bug, X, Lightbulb, BarChart3, Download, Paperclip, FileText, FileIcon, AlertTriangle, MessageSquare, Database } from "lucide-react";
 import { DebugPanel } from "../DebugPanel";
@@ -9,6 +9,8 @@ import VoiceControls from "./VoiceControls";
 import ProcessingStatusIndicator from "../ProcessingStatusIndicator";
 import BAInsightsModal from '../../Modals/BAInsightsModal';
 import VisualizationModal from '../../Modals/VisualizationModal';
+import HumanApprovalDialog from '../HumanApprovalDialog';
+// import ApprovalRequestCard from '../ApprovalRequestCard';
 import { exportToCSV, generateCSVFilename } from '../../utils/csvUtils';
 
 import { createMessagePoller, createStatusPoller } from '../../utils/smartPolling';
@@ -95,6 +97,12 @@ const ChatInterface: React.FC = () => {
   // Rating states
   const [ratings, setRatings] = useState<{ [key: string]: number }>({});
   const [ratingLoading, setRatingLoading] = useState<{ [key: string]: boolean }>({});
+  
+  // Human Approval State
+  const [showApprovalDialog, setShowApprovalDialog] = useState(false);
+  const [approvalRequest, setApprovalRequest] = useState<any>(null);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<any>(null);
 
   // Paged table result state (keyed by interactionId)
   const [resultMeta, setResultMeta] = useState<{[key: string]: InteractionResultMeta | null}>({});
@@ -122,22 +130,7 @@ const ChatInterface: React.FC = () => {
     pagedInitRef.current = pagedInit;
   }, [pagedInit]);
 
-  const ensureMeta = useCallback(async (interactionId: string) => {
-    if (!interactionId) return null;
-    if (resultMetaRef.current[interactionId] !== undefined) {
-      return resultMetaRef.current[interactionId];
-    }
-    try {
-      const meta = await getInteractionResultMeta(interactionId);
-      setResultMeta(prev => ({ ...prev, [interactionId]: meta }));
-      // initialize UI page size if not set
-      setPageSizeUiByIx(prev => ({ ...prev, [interactionId]: prev[interactionId] ?? meta.page_size }));
-      return meta;
-    } catch (error) {
-      setResultMeta(prev => ({ ...prev, [interactionId]: null }));
-      return null;
-    }
-  }, []); // Remove resultMeta dependency to prevent infinite loops
+  // Removed unused ensureMeta function // Remove resultMeta dependency to prevent infinite loops
 
   const loadPage = useCallback(async (interactionId: string, pageIndex: number) => {
     if (!interactionId) return;
@@ -519,6 +512,63 @@ const ChatInterface: React.FC = () => {
             // Get the latest interaction from the response
             const latestInteraction = response.data?.interactions[0];
             
+            // Debug: Log the interaction data
+            console.log('🔍 DEBUG: Latest interaction:', latestInteraction);
+            console.log('🔍 DEBUG: Interaction type:', latestInteraction?.interaction_type);
+            console.log('🔍 DEBUG: Interaction keys:', Object.keys(latestInteraction || {}));
+            console.log('🔍 DEBUG: Approval request:', latestInteraction?.approval_request);
+            console.log('🔍 DEBUG: Clarification questions:', latestInteraction?.clarification_questions);
+            
+            // Check for human approval request
+            if (latestInteraction?.interaction_type === 'human_approval') {
+              // Handle human approval request
+              console.log('Human approval detected:', latestInteraction);
+              
+              // Extract approval request data
+              const approvalData = {
+                message: latestInteraction.approval_request?.message || "I need to confirm some details before proceeding.",
+                intent_summary: latestInteraction.approval_request?.intent_summary || {},
+                clarification_questions: latestInteraction.clarification_questions || [],
+                similar_columns: latestInteraction.similar_columns || [],
+                requires_human_input: true,
+                approval_type: latestInteraction.approval_request?.approval_type || 'intent_confirmation'
+              };
+              
+              setApprovalRequest(approvalData);
+              setPendingApproval(latestInteraction);
+              setShowApprovalDialog(true);
+              
+              // Stop polling as we're waiting for human input
+              if (messagePollerRef.current) {
+                messagePollerRef.current.stop();
+              }
+              setPollingForPending(false);
+              return;
+            }
+            
+            // Check for clarification request
+            if (latestInteraction?.interaction_type === 'clarification') {
+              // Handle clarification request
+              const clarificationMessage = {
+                id: `clarification_${Date.now()}`,
+                role: "assistant" as const,
+                content: latestInteraction.question || "I need more information to help you.",
+                timestamp: new Date().toISOString(),
+                interactionId: `clarification_${Date.now()}`,
+                conversationId: selectedConversationId,
+                isClarification: true
+              };
+              
+              setInteraction(prev => [...prev, clarificationMessage]);
+              
+              // Stop polling as we're waiting for human input
+              if (messagePollerRef.current) {
+                messagePollerRef.current.stop();
+              }
+              setPollingForPending(false);
+              return;
+            }
+            
             // Only process if we have a valid latest interaction with a response
             if (latestInteraction?.final_result) {
               // Create the final messages array
@@ -884,15 +934,7 @@ const ChatInterface: React.FC = () => {
     }
   };
 
-  const copyToClipboard = async (text: string) => {
-    try {
-      if (!text) return;
-      await navigator.clipboard.writeText(text);
-      console.log('Copied to clipboard');
-    } catch (error) {
-      console.error('Failed to copy:', error);
-    }
-  };
+  // Removed unused copyToClipboard function
 
   // State to hold BA context for regeneration
   const [baInteractionId, setBaInteractionId] = useState<string | undefined>(undefined);
@@ -977,6 +1019,55 @@ const ChatInterface: React.FC = () => {
       setChartConfig({ error: "Failed to regenerate visualization." });
     }
     setChartLoading(false);
+  };
+
+  // Human Approval Handlers
+  const handleHumanApprovalResponse = async (response: any) => {
+    if (!selectedConversationId || !pendingApproval) return;
+    
+    setApprovalLoading(true);
+    try {
+      const result = await handleHumanApproval(selectedConversationId, response);
+      
+      if (result.data) {
+        // Handle the response from the backend
+        if (result.data.interaction_type === 'human_approval') {
+          // Still needs more approval
+          setApprovalRequest(result.data);
+          setPendingApproval(result.data);
+        } else {
+          // Approval completed, process the final response
+          setShowApprovalDialog(false);
+          setPendingApproval(null);
+          setApprovalRequest(null);
+          
+          // Add the final response to the conversation
+          if (result.data.final_result) {
+            const finalMessage = {
+              id: `approval_${Date.now()}`,
+              role: "assistant" as const,
+              content: result.data.final_result,
+              timestamp: new Date().toISOString(),
+              data: result.data.raw_result_set || [],
+              sql: result.data.cleaned_query || '',
+              interactionId: `approval_${Date.now()}`,
+              conversationId: selectedConversationId,
+            };
+            setInteraction(prev => [...prev, finalMessage]);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error handling human approval:', error);
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleApprovalReject = () => {
+    setShowApprovalDialog(false);
+    setPendingApproval(null);
+    setApprovalRequest(null);
   };
 
   const handleRating = async (conversationId: string, interactionId: string, rating: number) => {
@@ -1280,7 +1371,7 @@ const ChatInterface: React.FC = () => {
 
                 // Original logic: parse content and render table if possible
                 const parsedContent = parseJsonContent(msg.content);
-                const isJsonArray = Array.isArray(parsedContent);
+                // Removed unused isJsonArray variable
                 const isJsonObject = parsedContent && typeof parsedContent === 'object' && !Array.isArray(parsedContent);
                 const isNewFormat = isJsonObject && parsedContent.data && parsedContent.metadata;
                 const metaForIx = resultMeta[msg.interactionId];
@@ -1315,7 +1406,7 @@ const ChatInterface: React.FC = () => {
                                 // Handle new format with pagination
                                 if (isNewFormat && parsedContent.data) {
                                   const allRows = parsedContent.data;
-                                  const headers = parsedContent.metadata?.columns || (allRows.length > 0 ? Object.keys(allRows[0]) : []);
+                                  // Removed unused headers variable
                                   const totalRows = allRows.length;
                                   
                                   // Use UI pagination settings
@@ -1456,8 +1547,7 @@ const ChatInterface: React.FC = () => {
                                 const total = metaForIx?.total_rows || 0;
                                 const totalPages = Math.max(1, Math.ceil(total / uiSize));
                                 const uiPageIndex = currentUiPageByIx[msg.interactionId] ?? Math.floor((storedPageIndex * backendSize) / uiSize);
-                                const showingStart = uiPageIndex * uiSize + 1;
-                                const showingEnd = Math.min(total, (uiPageIndex + 1) * uiSize);
+                                // Removed unused showingStart and showingEnd variables
 
                                 // Determine which backend pages are needed to assemble the desired UI page
                                 const startRow = uiPageIndex * uiSize;
@@ -1481,7 +1571,7 @@ const ChatInterface: React.FC = () => {
                                 }
                                 const offsetInFirst = startRow - startBackend * backendSize;
                                 const rows = stitched.slice(offsetInFirst, offsetInFirst + (endRow - startRow));
-                                const cols = metaForIx?.columns || (rows && rows.length > 0 ? Object.keys(rows[0]) : []);
+                                // Removed unused cols variable
                                 return (
                                   <div>
                                     {rows ? (
@@ -1895,6 +1985,15 @@ const ChatInterface: React.FC = () => {
           isLoading={chartLoading}
           userQuery={chartUserQuery}
           onRegenerate={handleRegenerateVisualization}
+        />
+
+        {/* Human Approval Dialog */}
+        <HumanApprovalDialog
+          isOpen={showApprovalDialog}
+          onClose={handleApprovalReject}
+          approvalRequest={approvalRequest}
+          onApprove={handleHumanApprovalResponse}
+          isLoading={approvalLoading}
         />
       </div>
     </>

@@ -24,33 +24,86 @@ def create_template_with_bigquery_info(content: str, chatbot: dict, include_sche
  
     if include_schema and chatbot.get("db_url"):
         try:
-            # Use chatbot's schema configuration for filtering
-            from app.utils.schema_extractor import SchemaExtractor
+            # 🔧 ENHANCED SCHEMA: Use the enhanced semantic schema instead of raw database schema
+            from .chatbot_service import get_semantic_schema_service
             import json
             
-            # Parse selected_tables from JSON string
-            selected_tables = None
-            print(f"[DEBUG] chatbot.get('selected_tables'): {chatbot.get('selected_tables')}")
-            if chatbot.get("selected_tables"):
-                try:
-                    selected_tables = json.loads(chatbot.get("selected_tables"))
-                    print(f"[DEBUG] Parsed selected_tables: {selected_tables}")
-                except (json.JSONDecodeError, TypeError) as e:
-                    print(f"[DEBUG] Failed to parse selected_tables: {e}")
-                    selected_tables = None
-            else:
-                print(f"[DEBUG] No selected_tables found in chatbot data")
+            print(f"[DEBUG] Including enhanced semantic schema for chatbot {chatbot.get('chatbot_id')}")
             
-            extractor = SchemaExtractor(
-                db_url=chatbot["db_url"],
-                db_type=chatbot.get("db_type", "sqlite"),
-                credentials_json=chatbot.get("credentials_json"),
-                schema_name=chatbot.get("schema_name"),
-                selected_tables=selected_tables
-            )
-            summary = extractor.get_schema_summary()
-            final_content = f"Database Schema:\n{summary}\n\nTemplate Content:\n{final_content}"
+            # Get the enhanced semantic schema from the database
+            chatbot_id = chatbot.get('chatbot_id') or chatbot.get('id')
+            if not chatbot_id:
+                raise ServiceException("Chatbot ID not found in chatbot data", 400)
+            enhanced_schema = get_semantic_schema_service(chatbot_id)
+            
+            if enhanced_schema and enhanced_schema.get('tables'):
+                # Create a comprehensive schema summary with priority fields
+                summary = f"Enhanced Database Schema (with AI Selection Metadata)\n"
+                summary += f"Database Type: {enhanced_schema.get('database_type', 'Unknown')}\n"
+                summary += f"Total Tables: {len(enhanced_schema.get('tables', {}))}\n\n"
+                
+                for table_name, table_data in enhanced_schema.get('tables', {}).items():
+                    summary += f"Table: {table_name}\n"
+                    if table_data.get('business_context'):
+                        summary += f"  Business Context: {table_data['business_context']}\n"
+                    
+                    columns = table_data.get('columns', {})
+                    summary += f"  Columns ({len(columns)}):\n"
+                    
+                    for col_name, col_data in columns.items():
+                        # Basic column info
+                        pk_marker = " (PK)" if col_data.get('is_primary_key') or col_data.get('pk') else ""
+                        fk_marker = " (FK)" if col_data.get('is_foreign_key') or col_data.get('fk') else ""
+                        type_info = col_data.get('type') or col_data.get('data_type', 'unknown')
+                        
+                        summary += f"    - {col_name}: {type_info}{pk_marker}{fk_marker}\n"
+                        
+                        # Enhanced metadata
+                        if col_data.get('description'):
+                            summary += f"      Description: {col_data['description']}\n"
+                        if col_data.get('business_context'):
+                            summary += f"      Business Context: {col_data['business_context']}\n"
+                        if col_data.get('business_terms'):
+                            summary += f"      Business Terms: {', '.join(col_data['business_terms'])}\n"
+                        if col_data.get('priority') and col_data.get('priority') != 'medium':
+                            summary += f"      Priority: {col_data['priority'].upper()}\n"
+                        if col_data.get('is_preferred'):
+                            summary += f"      Preferred Column: Yes\n"
+                        if col_data.get('use_cases'):
+                            summary += f"      Use Cases: {', '.join(col_data['use_cases'])}\n"
+                        if col_data.get('relevance_keywords'):
+                            summary += f"      Relevance Keywords: {', '.join(col_data['relevance_keywords'])}\n"
+                        if col_data.get('business_context'):
+                            summary += f"      Business Context: {col_data['business_context']}\n"
+                    
+                    summary += "\n"
+                
+                final_content = f"Database Schema:\n{summary}\n\nTemplate Content:\n{final_content}"
+                print(f"[DEBUG] Enhanced schema included successfully")
+            else:
+                # Fallback to raw schema if enhanced schema not available
+                print(f"[DEBUG] Enhanced schema not available, falling back to raw schema")
+                from app.utils.schema_extractor import SchemaExtractor
+                
+                selected_tables = None
+                if chatbot.get("selected_tables"):
+                    try:
+                        selected_tables = json.loads(chatbot.get("selected_tables"))
+                    except (json.JSONDecodeError, TypeError):
+                        selected_tables = None
+                
+                extractor = SchemaExtractor(
+                    db_url=chatbot["db_url"],
+                    db_type=chatbot.get("db_type", "sqlite"),
+                    credentials_json=chatbot.get("credentials_json"),
+                    schema_name=chatbot.get("schema_name"),
+                    selected_tables=selected_tables
+                )
+                summary = extractor.get_schema_summary()
+                final_content = f"Database Schema:\n{summary}\n\nTemplate Content:\n{final_content}"
+                
         except Exception as e:
+            print(f"[DEBUG] Error including enhanced schema: {e}")
             raise ServiceException(f"Failed to include schema: {str(e)}", 500)
     return final_content
  
@@ -74,6 +127,7 @@ def configure_template_for_chatbot_service(chatbot_id: str):
         )
    
     # Auto-configure LLM if missing but database is configured
+    # Only auto-configure if no LLM is set AND status is db_configured (not llm_configured)
     if current_status == "db_configured" and not chatbot.get("current_llm_name"):
         logger.info(f"Auto-configuring default LLM for chatbot {chatbot_id} during template setup")
         db = get_chatbot_db()
@@ -84,6 +138,8 @@ def configure_template_for_chatbot_service(chatbot_id: str):
             status="llm_configured"
         )
         logger.info(f"Chatbot {chatbot_id} auto-configured with default LLM settings")
+    elif chatbot.get("current_llm_name"):
+        logger.info(f"Chatbot {chatbot_id} already has LLM configured: {chatbot.get('current_llm_name')}")
  
     db, template_id = get_chatbot_db(), data.get("template_id")
     name, description, content = data.get("name"), data.get(
@@ -234,32 +290,80 @@ def preview_template_service(template_id: int):
     final_prompt, schema_summary = template["content"], ""
     if include_schema:
         try:
-            chatbot = get_chatbot_with_validation(chatbot_id)
-            if chatbot.get("db_url"):
-                # Use chatbot's schema configuration for filtering
-                from app.utils.schema_extractor import SchemaExtractor
-                import json
+            # 🔧 ENHANCED SCHEMA: Use enhanced semantic schema for preview too
+            from .chatbot_service import get_semantic_schema_service
+            
+            enhanced_schema = get_semantic_schema_service(chatbot_id)
+            
+            if enhanced_schema and enhanced_schema.get('tables'):
+                # Create enhanced schema summary for preview
+                summary = f"Enhanced Database Schema (with AI Selection Metadata)\n"
+                summary += f"Database Type: {enhanced_schema.get('database_type', 'Unknown')}\n"
+                summary += f"Total Tables: {len(enhanced_schema.get('tables', {}))}\n\n"
                 
-                # Parse selected_tables from JSON string
-                selected_tables = None
-                if chatbot.get("selected_tables"):
-                    try:
-                        selected_tables = json.loads(chatbot.get("selected_tables"))
-                    except (json.JSONDecodeError, TypeError):
-                        selected_tables = None
+                for table_name, table_data in enhanced_schema.get('tables', {}).items():
+                    summary += f"Table: {table_name}\n"
+                    if table_data.get('business_context'):
+                        summary += f"  Business Context: {table_data['business_context']}\n"
+                    
+                    columns = table_data.get('columns', {})
+                    summary += f"  Columns ({len(columns)}):\n"
+                    
+                    for col_name, col_data in columns.items():
+                        # Basic column info
+                        pk_marker = " (PK)" if col_data.get('is_primary_key') or col_data.get('pk') else ""
+                        fk_marker = " (FK)" if col_data.get('is_foreign_key') or col_data.get('fk') else ""
+                        type_info = col_data.get('type') or col_data.get('data_type', 'unknown')
+                        
+                        summary += f"    - {col_name}: {type_info}{pk_marker}{fk_marker}\n"
+                        
+                        # Enhanced metadata
+                        if col_data.get('description'):
+                            summary += f"      Description: {col_data['description']}\n"
+                        if col_data.get('business_context'):
+                            summary += f"      Business Context: {col_data['business_context']}\n"
+                        if col_data.get('business_terms'):
+                            summary += f"      Business Terms: {', '.join(col_data['business_terms'])}\n"
+                        if col_data.get('priority') and col_data.get('priority') != 'medium':
+                            summary += f"      Priority: {col_data['priority'].upper()}\n"
+                        if col_data.get('is_preferred'):
+                            summary += f"      Preferred Column: Yes\n"
+                        if col_data.get('use_cases'):
+                            summary += f"      Use Cases: {', '.join(col_data['use_cases'])}\n"
+                        if col_data.get('relevance_keywords'):
+                            summary += f"      Relevance Keywords: {', '.join(col_data['relevance_keywords'])}\n"
+                        if col_data.get('business_context'):
+                            summary += f"      Business Context: {col_data['business_context']}\n"
+                    
+                    summary += "\n"
                 
-                extractor = SchemaExtractor(
-                    db_url=chatbot["db_url"],
-                    db_type=chatbot.get("db_type"),
-                    credentials_json=chatbot.get("credentials_json"),
-                    schema_name=chatbot.get("schema_name"),
-                    selected_tables=selected_tables
-                )
-                summary = extractor.get_schema_summary()
                 schema_summary = summary
                 final_prompt = f"Database Schema:\n{summary}\n\nTemplate Content:\n{final_prompt}"
+            else:
+                # Fallback to raw schema if enhanced schema not available
+                chatbot = get_chatbot_with_validation(chatbot_id)
+                if chatbot.get("db_url"):
+                    from app.utils.schema_extractor import SchemaExtractor
+                    import json
+                    
+                    selected_tables = None
+                    if chatbot.get("selected_tables"):
+                        try:
+                            selected_tables = json.loads(chatbot.get("selected_tables"))
+                        except (json.JSONDecodeError, TypeError):
+                            selected_tables = None
+                    
+                    extractor = SchemaExtractor(
+                        db_url=chatbot["db_url"],
+                        db_type=chatbot.get("db_type"),
+                        credentials_json=chatbot.get("credentials_json"),
+                        schema_name=chatbot.get("schema_name"),
+                        selected_tables=selected_tables
+                    )
+                    summary = extractor.get_schema_summary()
+                    schema_summary = summary
+                    final_prompt = f"Database Schema:\n{summary}\n\nTemplate Content:\n{final_prompt}"
         except Exception as e:
-            logger.warning(
-                f"Could not generate schema for template preview: {e}")
+            logger.warning(f"Could not generate enhanced schema for template preview: {e}")
  
     return {"template": template, "schema_summary": schema_summary, "final_prompt": final_prompt, "include_schema": include_schema}

@@ -119,6 +119,16 @@ class SemanticColumn(BaseModel):
     is_foreign_key: bool = Field(default=False, description="Legacy field - use fk instead")
     synonyms: List[SynonymWithSamples] = Field(default_factory=list, description="Column-specific synonyms with sample values for LLM context")
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Enhanced AI selection fields
+    description: Optional[str] = Field(default=None, description="Business-friendly description for AI column selection")
+    business_context: Optional[str] = Field(default=None, description="Business context for AI column selection")
+    business_terms: List[str] = Field(default_factory=list, description="Business terms for AI column matching")
+    priority: Optional[str] = Field(default="medium", description="Column priority for AI selection (high/medium/low)")
+    is_preferred: bool = Field(default=False, description="Whether this column is preferred for AI selection")
+    use_cases: List[str] = Field(default_factory=list, description="Use cases for this column")
+    relevance_keywords: List[str] = Field(default_factory=list, description="Keywords for relevance matching")
+    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
@@ -200,6 +210,27 @@ class SemanticColumn(BaseModel):
             
         if self.default:
             result["default"] = self.default
+        
+        # Enhanced AI selection fields
+        if self.description:
+            result["description"] = self.description
+        if self.business_context:
+            result["business_context"] = self.business_context
+        
+        if self.business_terms:
+            result["business_terms"] = self.business_terms
+        
+        if self.priority and self.priority != "medium":
+            result["priority"] = self.priority
+        
+        if self.is_preferred:
+            result["is_preferred"] = self.is_preferred
+        
+        if self.use_cases:
+            result["use_cases"] = self.use_cases
+        
+        if self.relevance_keywords:
+            result["relevance_keywords"] = self.relevance_keywords
             
         return result
 

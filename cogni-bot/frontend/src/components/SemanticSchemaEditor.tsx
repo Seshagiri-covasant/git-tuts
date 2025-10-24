@@ -25,7 +25,6 @@ interface SemanticColumn {
   synonyms: SynonymWithSamples[];
   metadata: Record<string, any>;
   // New column metadata fields for intelligent selection
-  business_description?: string;
   business_terms?: string[];
   priority?: 'high' | 'medium' | 'low';
   is_preferred?: boolean;
@@ -52,12 +51,6 @@ interface SemanticTable {
   updated_at: string;
 }
 
-interface UserPreferences {
-  risk_score_column?: string;
-  amount_column?: string;
-  date_column?: string;
-  default_risk_threshold?: number;
-}
 
 interface AggregationPattern {
   id: string;
@@ -415,11 +408,11 @@ const ColumnEditor = React.memo<{
             
             {/* Business Description */}
             <TextAreaInput
-              defaultValue={column.business_description || ''}
-              onCommit={(value) => onFieldChange('business_description', value)}
+              defaultValue={column.description || ''}
+              onCommit={(value) => onFieldChange('description', value)}
               placeholder="Business-friendly description (e.g., Comprehensive risk assessment combining all risk factors)"
               rows={2}
-              fieldKey={`${column.id}-business_description`}
+              fieldKey={`${column.id}-description`}
             />
             
             {/* Business Terms */}
@@ -432,7 +425,6 @@ const ColumnEditor = React.memo<{
                   const terms = e.target.value.split(',').map(term => term.trim()).filter(term => term);
                   onFieldChange('business_terms', terms);
                 }}
-                placeholder="e.g., overall risk, total risk, comprehensive risk"
                 className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -475,7 +467,6 @@ const ColumnEditor = React.memo<{
                   const cases = e.target.value.split(',').map(c => c.trim()).filter(c => c);
                   onFieldChange('use_cases', cases);
                 }}
-                placeholder="e.g., general risk analysis, comprehensive assessment"
                 className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -490,7 +481,6 @@ const ColumnEditor = React.memo<{
                   const keywords = e.target.value.split(',').map(k => k.trim()).filter(k => k);
                   onFieldChange('relevance_keywords', keywords);
                 }}
-                placeholder="e.g., risk, score, assessment, overall"
                 className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -633,7 +623,6 @@ const TableDetailsEditor = React.memo<{
         defaultValue={table.description || ''}
         onCommit={(value) => onFieldChange('description', value)}
         label="Description"
-        placeholder="Contains all registered customer information including personal details and account status"
         fieldKey={`${table.id}-description`}
       />
       <TextAreaInput
@@ -962,13 +951,6 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   
   
-  // User preferences state
-  const [userPreferences, setUserPreferences] = useState<UserPreferences>({
-    risk_score_column: '',
-    amount_column: '',
-    date_column: '',
-    default_risk_threshold: 10
-  });
   const [aggregationPatterns, setAggregationPatterns] = useState<AggregationPattern[]>([]);
   const [showAggregationDialog, setShowAggregationDialog] = useState(false);
   const [selectedTable, setSelectedTable] = useState<SemanticTable | null>(null);
@@ -981,7 +963,6 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [showMetricsDialog, setShowMetricsDialog] = useState(false);
-  const [showUserPreferencesDialog, setShowUserPreferencesDialog] = useState(false);
   // Preserve scroll position in inspector panel when toggling edit
   const inspectorScrollRef = React.useRef<HTMLDivElement | null>(null);
   // Relationship filtering state (used by relationship inspector)
@@ -1242,8 +1223,10 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const loadSemanticSchema = async () => {
     try {
       setLoading(true);
+      console.log('🔍 LOADING SCHEMA: Fetching schema from database...');
       const response = await getSemanticSchema(chatbotId);
       const incoming = response.data.semantic_schema;
+      console.log('🔍 LOADING SCHEMA: Schema loaded from database:', incoming);
       const normalized = (function normalize() {
         const nowIso = new Date().toISOString();
         const uiTables: Record<string, any> = {};
@@ -1276,7 +1259,36 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
               metadata: c?.metadata || {},
               created_at: c?.created_at || nowIso,
               updated_at: c?.updated_at || nowIso,
+              // 🔧 PRIORITY FIELDS: Load enhanced AI selection fields from database
+              priority: c?.priority || 'medium',
+              business_terms: Array.isArray(c?.business_terms) ? c.business_terms : [],
+              is_preferred: Boolean(c?.is_preferred),
+              use_cases: Array.isArray(c?.use_cases) ? c.use_cases : [],
+              relevance_keywords: Array.isArray(c?.relevance_keywords) ? c.relevance_keywords : [],
             };
+            
+            // 🔍 LOG PRIORITY FIELDS: Log what priority fields are being loaded
+            if (c?.priority || c?.description || c?.business_terms || c?.is_preferred) {
+              console.log(`🔍 LOADING PRIORITY FIELDS: ${tableName}.${colName}:`, {
+                priority: c?.priority,
+                description: c?.description,
+                business_terms: c?.business_terms,
+                is_preferred: c?.is_preferred,
+                use_cases: c?.use_cases,
+                relevance_keywords: c?.relevance_keywords
+              });
+            }
+            
+            // 🔍 DEBUG: Always log a few key columns to see what's being loaded
+            if (colName === 'Overall_Tran_Risk_Score' || colName === 'Overall_Risk_Score') {
+              console.log(`🔍 DEBUG LOADING: ${tableName}.${colName}:`, {
+                priority: c?.priority,
+                description: c?.description,
+                is_preferred: c?.is_preferred,
+                synonyms: c?.synonyms,
+                raw_data: c
+              });
+            }
           });
           // Handle table metrics - convert from dict to metric_items format
           const tableMetrics = t?.metrics || {};
@@ -1404,7 +1416,11 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
         } as DatabaseSchema;
       })();
 
+      console.log('🔍 SETTING SCHEMA: About to set schema with normalized data');
+      console.log('🔍 SETTING SCHEMA: Normalized schema keys:', Object.keys(normalized));
+      console.log('🔍 SETTING SCHEMA: Normalized tables keys:', Object.keys(normalized.tables || {}));
       setSchema(normalized);
+      console.log('🔍 SETTING SCHEMA: Schema set successfully');
       
       // Load aggregation patterns from schema
       if (incoming.aggregation_patterns) {
@@ -1420,9 +1436,11 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
         setSelectedTables(new Set([tables[firstTableName].id]));
       }
     } catch (error: any) {
+      console.error('🔍 LOADING ERROR: Error loading semantic schema:', error);
       showToast('Failed to load semantic schema: ' + (error.response?.data?.error || error.message), 'error');
     } finally {
       setLoading(false);
+      console.log('🔍 LOADING COMPLETE: Schema loading completed (success or error)');
     }
   };
 
@@ -1473,12 +1491,17 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   }, [selectedTable]);
 
   const updateColumnField = useCallback((tableId: string, columnId: string, field: keyof SemanticColumn, value: any) => {
+    console.log(`🔍 UPDATING COLUMN FIELD: ${tableId}.${columnId}.${field} = ${JSON.stringify(value)}`);
+    
     // Preserve scroll position during updates
     const scrollContainer = inspectorScrollRef.current;
     const scrollTop = scrollContainer?.scrollTop || 0;
     
     setSchema(prev => {
-      if (!prev) return prev;
+      if (!prev) {
+        console.log('🔍 ERROR: No previous schema to update');
+        return prev;
+      }
       
       const updatedTables = { ...prev.tables };
       const tableNames = Object.keys(updatedTables);
@@ -1495,6 +1518,7 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
                 [field]: value, 
                 updated_at: new Date().toISOString() 
               };
+              console.log(`🔍 COLUMN UPDATED: ${tableName}.${columnName}`, updatedColumns[columnName]);
               break;
             }
           }
@@ -1623,6 +1647,28 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
   const handleSaveSchema = async () => {
     console.log(' Save button clicked!');
     console.log('Schema:', schema);
+    
+    // 🔍 LOG PRIORITY FIELDS: Log what priority fields are being sent
+    console.log('🔍 PRIORITY FIELDS DEBUG: Checking schema for priority fields...');
+    if (schema?.tables) {
+      for (const [tableName, table] of Object.entries(schema.tables)) {
+        if (table?.columns) {
+          for (const [colName, colData] of Object.entries(table.columns)) {
+            const columnData = colData as SemanticColumn;
+            if (columnData?.priority || columnData?.description || columnData?.business_terms || columnData?.is_preferred) {
+              console.log(`🔍 PRIORITY FIELDS: ${tableName}.${colName}:`, {
+                priority: columnData.priority,
+                description: columnData.description,
+                business_terms: columnData.business_terms,
+                is_preferred: columnData.is_preferred,
+                use_cases: columnData.use_cases,
+                relevance_keywords: columnData.relevance_keywords
+              });
+            }
+          }
+        }
+      }
+    }
     console.log('Saving state:', saving);
     
     if (!schema) {
@@ -1718,7 +1764,15 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
             created_at: col.created_at,
             updated_at: col.updated_at,
             // Preserve detailed fk reference for UI consumers
-            fk_ref: col.fk && typeof col.fk === 'object' ? col.fk : (col.is_foreign_key ? { table: "", column: "" } : null)
+            fk_ref: col.fk && typeof col.fk === 'object' ? col.fk : (col.is_foreign_key ? { table: "", column: "" } : null),
+            // 🔧 PRIORITY FIELDS: Include enhanced AI selection fields in payload
+            priority: col.priority || 'medium',
+            business_terms: Array.isArray(col.business_terms) ? col.business_terms : [],
+            is_preferred: Boolean(col.is_preferred),
+            use_cases: Array.isArray(col.use_cases) ? col.use_cases : [],
+            relevance_keywords: Array.isArray(col.relevance_keywords) ? col.relevance_keywords : [],
+            business_context: col.business_context || '',
+            exclude_column: Boolean(col.exclude_column)
           };
         });
 
@@ -1926,6 +1980,35 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
       // Log the full payload for debugging (truncated)
       console.log('Full Payload (truncated):', JSON.stringify(payloadSchema, null, 2).substring(0, 1000) + '...');
       
+      // 🔍 DEBUG: Check if priority fields are in the payload
+      console.log('🔍 PRIORITY FIELDS IN PAYLOAD: Checking if priority fields are being sent...');
+      let priorityFieldsInPayload = false;
+      for (const [tableName, table] of Object.entries(payloadSchema.tables)) {
+        if (table?.columns) {
+          for (const [colName, colData] of Object.entries(table.columns)) {
+            const columnData = colData as SemanticColumn;
+            if (columnData?.priority || columnData?.description || columnData?.business_terms || columnData?.is_preferred) {
+              console.log(`🔍 PRIORITY FIELDS IN PAYLOAD: ${tableName}.${colName}:`, {
+                priority: columnData.priority,
+                description: columnData.description,
+                business_terms: columnData.business_terms,
+                is_preferred: columnData.is_preferred,
+                use_cases: columnData.use_cases,
+                relevance_keywords: columnData.relevance_keywords
+              });
+              priorityFieldsInPayload = true;
+            }
+          }
+        }
+      }
+      
+      if (!priorityFieldsInPayload) {
+        console.log('🔍 NO PRIORITY FIELDS FOUND IN PAYLOAD!');
+        console.log('🔍 This means the frontend is not including priority fields in the payload');
+      } else {
+        console.log('🔍 PRIORITY FIELDS FOUND IN PAYLOAD - sending to backend');
+      }
+      
       // Validate payload before sending
       try {
         JSON.stringify(payloadSchema);
@@ -1958,6 +2041,11 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
       console.log('Schema updated successfully');
       showToast('Schema updated successfully', 'success');
       
+      // 🔄 RELOAD SCHEMA: Reload the schema from database to show updated values
+      console.log('🔄 Reloading schema after successful save...');
+      await loadSemanticSchema();
+      console.log('🔄 Schema reloaded successfully');
+      
       if (onSave) {
         try {
           onSave(payloadSchema);
@@ -1967,15 +2055,18 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
         }
       }
     } catch (error: any) {
-      console.error(' Save schema error:', error);
-      console.error(' Error response:', error.response?.data);
-      console.error(' Error status:', error.response?.status);
-      console.error(' Error headers:', error.response?.headers);
+      console.error('🔍 SAVE SCHEMA ERROR:', error);
+      console.error('🔍 Error response:', error.response?.data);
+      console.error('🔍 Error status:', error.response?.status);
+      console.error('🔍 Error headers:', error.response?.headers);
+      console.error('🔍 Error message:', error.message);
+      console.error('🔍 Error stack:', error.stack);
       
       const errorMessage = error.response?.data?.error || error.message || 'Unknown error occurred';
       showToast('Failed to save schema: ' + errorMessage, 'error');
       throw error; // Re-throw so calling functions can handle it
     } finally {
+      console.log('🔍 Save process completed, setting saving to false');
       setSaving(false);
     }
   };
@@ -2473,13 +2564,6 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
               <span className="text-green-600 font-medium">Metrics</span>
             </button>
             <button
-              onClick={() => setShowUserPreferencesDialog(true)}
-              className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px]"
-            >
-              <Edit3 className="w-4 h-4 mr-2 text-blue-600" />
-              <span className="text-blue-600 font-medium">AI Preferences</span>
-            </button>
-            <button
               onClick={() => setShowAggregationDialog(true)}
               className="flex items-center justify-center px-6 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 min-w-[140px]"
             >
@@ -2487,10 +2571,18 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
               <span className="text-green-600 font-medium">Aggregation Patterns</span>
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
+                try {
                 console.log('🔍 Save Changes button clicked!');
                 console.log('Button disabled?', saving);
-                handleSaveSchema();
+                  console.log('Schema exists?', !!schema);
+                  console.log('Chatbot ID:', chatbotId);
+                  console.log('Current schema keys:', schema ? Object.keys(schema) : 'No schema');
+                  await handleSaveSchema();
+                  console.log('🔍 Save Changes button click completed');
+                } catch (error) {
+                  console.error('🔍 Save Changes button click error:', error);
+                }
               }}
               disabled={saving}
               className="flex items-center justify-center px-6 py-2.5 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 min-w-[140px]"
@@ -3609,124 +3701,6 @@ const SemanticSchemaEditor: React.FC<SemanticSchemaEditorProps> = ({ chatbotId, 
         </div>
       )}
       
-      {/* User Preferences Dialog */}
-      {showUserPreferencesDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">User Preferences for AI Column Selection</h3>
-              
-              <div className="space-y-4">
-                {/* Risk Score Column Preference */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Risk Score Column</label>
-                  <select
-                    value={userPreferences.risk_score_column || ''}
-                    onChange={(e) => setUserPreferences({
-                      ...userPreferences,
-                      risk_score_column: e.target.value
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select Column</option>
-                    {Object.values(schema?.tables || {}).flatMap(table => 
-                      Object.values(table.columns || {}).map(col => (
-                        <option key={col.id} value={col.name}>
-                          {col.name} ({table.name})
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                
-                {/* Amount Column Preference */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Amount Column</label>
-                  <select
-                    value={userPreferences.amount_column || ''}
-                    onChange={(e) => setUserPreferences({
-                      ...userPreferences,
-                      amount_column: e.target.value
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select Column</option>
-                    {Object.values(schema?.tables || {}).flatMap(table => 
-                      Object.values(table.columns || {}).map(col => (
-                        <option key={col.id} value={col.name}>
-                          {col.name} ({table.name})
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                
-                {/* Date Column Preference */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Date Column</label>
-                  <select
-                    value={userPreferences.date_column || ''}
-                    onChange={(e) => setUserPreferences({
-                      ...userPreferences,
-                      date_column: e.target.value
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select Column</option>
-                    {Object.values(schema?.tables || {}).flatMap(table => 
-                      Object.values(table.columns || {}).map(col => (
-                        <option key={col.id} value={col.name}>
-                          {col.name} ({table.name})
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                
-                {/* Default Risk Threshold */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Default Risk Threshold</label>
-                  <input
-                    type="number"
-                    value={userPreferences.default_risk_threshold || 10}
-                    onChange={(e) => setUserPreferences({
-                      ...userPreferences,
-                      default_risk_threshold: parseInt(e.target.value) || 10
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="10"
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <div className="p-6 border-t border-gray-200 bg-gray-50">
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setShowUserPreferencesDialog(false)}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    // Save user preferences to schema
-                    const updatedSchema = {
-                      ...schema,
-                      user_preferences: userPreferences
-                    };
-                    setSchema(updatedSchema);
-                    setShowUserPreferencesDialog(false);
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Save Preferences
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Aggregation Patterns Dialog */}
       <AggregationPatternsDialog

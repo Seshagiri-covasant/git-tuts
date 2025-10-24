@@ -180,7 +180,7 @@ class ChatbotDbUtil:
             Column("db_url", String(500), nullable=True),
             Column("schema_name", String(100), nullable=True),
             Column("selected_tables", Text, nullable=True),  # JSON array of selected table names
-            Column("current_llm_name", String(100), default="COHERE"),
+            Column("current_llm_name", String(100), nullable=True),  # No default, set during LLM configuration
             Column("temperature", Float, default=0.7,
                    nullable=False),  # LLM temperature setting
             # Changed from String to DateTime for PostgreSQL
@@ -307,7 +307,7 @@ class ChatbotDbUtil:
                 values = {
                     'chatbot_id': chatbot_id,
                     'name': name,
-                    'current_llm_name': "COHERE",
+                    'current_llm_name': None,  # Will be set during LLM configuration
                     'temperature': temperature,
                     'created_at': now
                 }
@@ -319,7 +319,7 @@ class ChatbotDbUtil:
             return {
                 "chatbot_id": chatbot_id,
                 "name": name,
-                "current_llm_name": "COHERE",
+                "current_llm_name": None,  # Will be set during LLM configuration
                 "temperature": temperature,
                 "created_at": now.isoformat(),  # Convert to string for response
                 "status": status

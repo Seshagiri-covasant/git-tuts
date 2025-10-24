@@ -135,12 +135,12 @@ Guidelines:
 
 Remember: You should understand intent with perfect accuracy, just like ChatGPT does."""
         
-        # Build knowledge overview for the LLM
-        knowledge_overview = self._build_knowledge_overview(knowledge_data, user_question)
+        # Build knowledge overview for the LLM with semantic context
+        knowledge_overview = self._build_knowledge_overview_with_semantic_context(knowledge_data, user_question)
         
-        # 🔍 LOGGING: Track what data is being sent to LLM
+        # 🔍 ENHANCED LOGGING: Track what schema data is being sent to LLM
         print(f"\n{'='*80}")
-        print(f"🔍 LLM COLUMN USAGE DEBUG: Intent Picker")
+        print(f"🔍 SCHEMA DESCRIPTION DEBUG: Intent Picker")
         print(f"{'='*80}")
         print(f"📝 User Question: {user_question}")
         print(f"📊 Knowledge Overview Length: {len(knowledge_overview)} characters")
@@ -152,13 +152,41 @@ Remember: You should understand intent with perfect accuracy, just like ChatGPT 
             print(f"📊 Schema Tables: {list(schema.get('tables', {}).keys()) if isinstance(schema.get('tables'), dict) else 'Not a dict'}")
             print(f"📈 Schema Metrics: {schema.get('metrics', [])}")
             
-            # Log specific columns available
+            # 🔍 NEW: Check for description fields in columns
             tables = schema.get('tables', {})
             if isinstance(tables, dict):
                 for table_name, table_data in tables.items():
                     columns = table_data.get('columns', {})
                     if isinstance(columns, dict):
                         print(f"📋 Table {table_name} columns: {list(columns.keys())[:10]}...")  # Show first 10 columns
+                        
+                        # 🔍 NEW: Check for description fields in each column
+                        description_columns = []
+                        for col_name, col_data in columns.items():
+                            if isinstance(col_data, dict):
+                                description = col_data.get('description', '')
+                                business_terms = col_data.get('business_terms', [])
+                                use_cases = col_data.get('use_cases', [])
+                                
+                                if description or business_terms or use_cases:
+                                    description_columns.append({
+                                        'column': col_name,
+                                        'description': description,
+                                        'business_terms': business_terms,
+                                        'use_cases': use_cases
+                                    })
+                        
+                        if description_columns:
+                            print(f"🎯 Columns with descriptions in {table_name}:")
+                            for desc_col in description_columns[:5]:  # Show first 5
+                                print(f"  - {desc_col['column']}: {desc_col['description']}")
+                                if desc_col['business_terms']:
+                                    print(f"    Business Terms: {desc_col['business_terms']}")
+                                if desc_col['use_cases']:
+                                    print(f"    Use Cases: {desc_col['use_cases']}")
+                        else:
+                            print(f"⚠️  No columns with descriptions found in {table_name}")
+                        
                         # Check for score related columns
                         score_columns = [col for col in columns.keys() if 'score' in col.lower() or 'metric' in col.lower()]
                         if score_columns:
@@ -170,46 +198,33 @@ Remember: You should understand intent with perfect accuracy, just like ChatGPT 
         
         user_prompt = f"""Conversation Context:
 {conversation_context}
-
-Current User Question: {user_question}
-
-Available Database Schema:
+Current User Question: "{user_question}"
+Available Database Schema with Business Context:
 {knowledge_overview}
+### YOUR TASK ###
+You are an expert data analyst. Your goal is to understand the user's intent and identify the exact columns needed to answer their question.
+### CRITICAL INSTRUCTIONS FOR COLUMN SELECTION ###
+1.  **REASONING IS PARAMOUNT:** Your primary task is to find the column whose **CONTEXT** (Description, Business Terms, Use Cases) best matches the user's goal expressed in their question. Do not rely on name similarity alone.
+2.  **INTELLIGENT SELECTION:** Analyze the user's question carefully and select the MOST RELEVANT column based on context. If one column's description clearly matches the user's intent better than others, select only that one.
+3.  **DETECT TRUE AMBIGUITY:** Only include multiple columns if the user's question is genuinely ambiguous and multiple columns could reasonably be the answer. True ambiguity occurs when the user's question could legitimately refer to different types of data (e.g., asking about "risk" without specifying whether they mean vendor risk, transaction risk, or cumulative risk).
+4.  **AVOID OVER-SELECTION:** Do not include all similar columns just because they have similar names. Choose the most contextually appropriate one based on the user's specific question.
+5.  **JUSTIFY YOUR CHOICES:** In the "reasoning" field, explicitly state which parts of a column's CONTEXT you used to make your selection. Explain how the column's description, business terms, or use cases align with the user's specific question.
 
-CRITICAL INSTRUCTION: When the question involves aggregations (AVG, SUM, COUNT, etc.) and there are pre-defined metrics available above, you MUST use the EXACT metric names from the "Available Database Metrics" section.
-
-IMPORTANT: 
-- Do NOT create your own metric names
-- Do NOT use raw column names from the table schema
-- ALWAYS prioritize the "Available Database Metrics" section over individual table columns
-- Use ONLY the exact names provided in the "Available Database Metrics" section
-
-ALWAYS copy the exact metric name from the "Available Database Metrics" section.
-
-Please analyze this question with perfect accuracy and determine:
-1. What tables are relevant to answer this question?
-2. What columns are needed from those tables?
-3. Are there any filters, aggregations, or sorting requirements?
-4. How does this relate to our previous conversation?
-5. What is your confidence level for each selection?
-
-Respond in this JSON format:
+### PRINCIPLES FOR INTELLIGENT SELECTION ###
+- **Context Matching**: Match the user's question context to the column's description. If the user mentions "payments" and you see a column described as "payment risk score", that's the best match.
+- **Specificity Over Generality**: If the user's question is specific (mentions a particular entity like "payments", "vendors", "transactions"), select the column that best matches that specificity.
+- **Description-Driven**: Always prioritize the column whose description most closely aligns with what the user is asking about.
+- **Avoid Over-Selection**: Don't include multiple similar columns unless the user's question is genuinely ambiguous about which type of data they want.
+### JSON RESPONSE FORMAT ###
+Respond with a JSON object in the following format. Do NOT include any comments or explanations outside the JSON structure.
 {{
-    "tables": ["table1", "table2"],
-    "columns": ["column1", "column2"],
-    "filters": ["filter1", "filter2"],
-    "aggregations": ["agg1", "agg2"],
-    "time_range": "time_range_info",
-    "sorting": "sorting_info",
-    "reasoning": "Detailed reasoning for your selections",
-    "is_follow_up": true/false,
-    "follow_up_context": "How this relates to previous conversation",
+    "tables": ["table_name"],
+    "columns": ["column_name_1", "column_name_2"],
+    "filters": ["filter_expression"],
+    "reasoning": "My detailed justification for selecting these columns based on their context and the user's question.",
     "confidence": {{
-        "tables": 0.9,
-        "columns": 0.8,
-        "filters": 0.7,
-        "aggregations": 0.6,
-        "overall": 0.8
+        "overall": 0.85,
+        "columns": 0.7 
     }}
 }}"""
 
@@ -234,13 +249,17 @@ Respond in this JSON format:
             
             # Parse the LLM response
             try:
-                # Clean the response text to remove markdown formatting
+                # Clean the response text to remove markdown formatting and comments
                 cleaned_response = response_text.strip()
                 if cleaned_response.startswith('```json'):
                     cleaned_response = cleaned_response[7:]
                 if cleaned_response.endswith('```'):
                     cleaned_response = cleaned_response[:-3]
                 cleaned_response = cleaned_response.strip()
+                
+                # Remove JSON comments (// comments) that break JSON parsing
+                import re
+                cleaned_response = re.sub(r'//.*$', '', cleaned_response, flags=re.MULTILINE)
                 
                 intent_analysis = json.loads(cleaned_response)
                 
@@ -356,17 +375,21 @@ Respond in this JSON format:
     def _enhance_table_selection(self, tables: List[str], user_question: str, knowledge_data: Dict) -> List[str]:
         """
         Enhance table selection with sophisticated logic.
+        FIXED: Check schema structure correctly.
         """
         enhanced_tables = []
         
+        # Get schema tables from the correct structure
+        schema = knowledge_data.get('schema', {})
+        schema_tables = schema.get('tables', {})
+        
         for table in tables:
-            # Check if table exists in knowledge data
-            table_key = f"table:{table}"
-            if table_key in knowledge_data:
+            # Check if table exists in schema
+            if table in schema_tables:
                 enhanced_tables.append(table)
             else:
                 # Try to find similar table names
-                similar_tables = self._find_similar_tables(table, knowledge_data)
+                similar_tables = self._find_similar_tables(table, schema_tables)
                 enhanced_tables.extend(similar_tables)
         
         return enhanced_tables
@@ -374,17 +397,29 @@ Respond in this JSON format:
     def _enhance_column_selection(self, columns: List[str], user_question: str, knowledge_data: Dict, conversation_context: str) -> List[str]:
         """
         Enhance column selection with sophisticated disambiguation.
+        FIXED: Check schema structure correctly.
         """
         enhanced_columns = []
         
+        # Get schema tables from the correct structure
+        schema = knowledge_data.get('schema', {})
+        schema_tables = schema.get('tables', {})
+        
         for column in columns:
-            # Check if column exists in knowledge data
-            column_key = f"column:{column}"
-            if column_key in knowledge_data:
+            # Check if column exists in any table's columns
+            column_exists = False
+            for table_name, table_data in schema_tables.items():
+                if isinstance(table_data, dict):
+                    table_columns = table_data.get('columns', {})
+                    if column in table_columns:
+                        column_exists = True
+                        break
+            
+            if column_exists:
                 enhanced_columns.append(column)
             else:
                 # Try to find similar column names
-                similar_columns = self._find_similar_columns(column, knowledge_data)
+                similar_columns = self._find_similar_columns(column, schema_tables)
                 enhanced_columns.extend(similar_columns)
         
         return enhanced_columns
@@ -460,38 +495,60 @@ Respond in this JSON format:
     def _calculate_confidence_scores(self, intent: Dict, user_question: str, knowledge_data: Dict) -> Dict:
         """
         Calculate sophisticated confidence scores for intent validation.
+        FIXED: Use LLM's confidence scores first, then fallback to calculated ones.
         """
         confidence_scores = {}
         
-        # Table confidence
+        # FIXED: Use LLM's confidence scores if available
+        llm_confidence = intent.get('confidence', {})
+        
+        # Table confidence - use LLM's confidence if available
         tables = intent.get('tables', [])
-        table_confidence = self._calculate_table_confidence(tables, user_question, knowledge_data)
-        confidence_scores['tables'] = table_confidence
+        if 'tables' in llm_confidence:
+            confidence_scores['tables'] = llm_confidence['tables']
+        else:
+            table_confidence = self._calculate_table_confidence(tables, user_question, knowledge_data)
+            confidence_scores['tables'] = table_confidence
         
-        # Column confidence
+        # Column confidence - use LLM's confidence if available
         columns = intent.get('columns', [])
-        column_confidence = self._calculate_column_confidence(columns, user_question, knowledge_data)
-        confidence_scores['columns'] = column_confidence
+        if 'columns' in llm_confidence:
+            confidence_scores['columns'] = llm_confidence['columns']
+        else:
+            column_confidence = self._calculate_column_confidence(columns, user_question, knowledge_data)
+            confidence_scores['columns'] = column_confidence
         
-        # Filter confidence
+        # Filter confidence - use LLM's confidence if available
         filters = intent.get('filters', [])
-        filter_confidence = self._calculate_filter_confidence(filters, user_question, knowledge_data)
-        confidence_scores['filters'] = filter_confidence
+        if 'filters' in llm_confidence:
+            confidence_scores['filters'] = llm_confidence['filters']
+        else:
+            filter_confidence = self._calculate_filter_confidence(filters, user_question, knowledge_data)
+            confidence_scores['filters'] = filter_confidence
         
-        # Aggregation confidence
+        # Aggregation confidence - use LLM's confidence if available
         aggregations = intent.get('aggregations', [])
-        agg_confidence = self._calculate_aggregation_confidence(aggregations, user_question, knowledge_data)
-        confidence_scores['aggregations'] = agg_confidence
+        if 'aggregations' in llm_confidence:
+            confidence_scores['aggregations'] = llm_confidence['aggregations']
+        else:
+            agg_confidence = self._calculate_aggregation_confidence(aggregations, user_question, knowledge_data)
+            confidence_scores['aggregations'] = agg_confidence
         
-        # Overall confidence
-        overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
-        confidence_scores['overall'] = overall_confidence
+        # Overall confidence - use LLM's overall confidence if available
+        if 'overall' in llm_confidence:
+            confidence_scores['overall'] = llm_confidence['overall']
+        else:
+            overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
+            confidence_scores['overall'] = overall_confidence
+        
+        print(f"[AdvancedIntentPicker] Confidence calculation: Using LLM confidence: {bool(llm_confidence)}, Final scores: {confidence_scores}")
         
         return confidence_scores
     
     def _validate_intent_with_schema(self, intent: Dict, knowledge_data: Dict) -> Dict:
         """
         Validate intent against available schema with intelligent column selection.
+        FIXED: Preserve LLM's correct selections instead of overwriting them.
         """
         validated_intent = intent.copy()
         
@@ -500,20 +557,25 @@ Respond in this JSON format:
         user_preferences = schema.get('user_preferences', {})
         tables = schema.get('tables', {})
         
-        # Validate tables
-        if 'tables' in intent:
-            validated_tables = []
-            for table in intent['tables']:
-                if table in tables:
-                    validated_tables.append(table)
-            validated_intent['tables'] = validated_tables
+        # FIXED: Always preserve LLM's table selection if it exists
+        if 'tables' in intent and intent['tables']:
+            validated_intent['tables'] = intent['tables']
+            print(f"[AdvancedIntentPicker] Schema validation: Preserving LLM's table selection: {intent['tables']}")
         
-        # Intelligent column selection using schema metadata
-        if 'columns' in intent:
-            validated_columns = self._select_columns_intelligently(
-                intent, validated_intent.get('tables', []), tables, user_preferences
-            )
-            validated_intent['columns'] = validated_columns
+        # FIXED: Always preserve LLM's column selection if it exists
+        if 'columns' in intent and intent['columns']:
+            validated_intent['columns'] = intent['columns']
+            print(f"[AdvancedIntentPicker] Schema validation: Preserving LLM's column selection: {intent['columns']}")
+        
+        # FIXED: Always preserve LLM's filter selection if it exists
+        if 'filters' in intent and intent['filters']:
+            validated_intent['filters'] = intent['filters']
+            print(f"[AdvancedIntentPicker] Schema validation: Preserving LLM's filter selection: {intent['filters']}")
+        
+        # FIXED: Always preserve LLM's aggregation selection if it exists
+        if 'aggregations' in intent and intent['aggregations']:
+            validated_intent['aggregations'] = intent['aggregations']
+            print(f"[AdvancedIntentPicker] Schema validation: Preserving LLM's aggregation selection: {intent['aggregations']}")
         
         return validated_intent
 
@@ -531,7 +593,7 @@ Respond in this JSON format:
                 available_columns = []
                 for col_name, col_data in columns.items():
                     if isinstance(col_data, dict):
-                        available_columns.append({
+                        column_metadata = {
                             'name': col_name,
                             'business_description': col_data.get('business_description', ''),
                             'business_terms': col_data.get('business_terms', []),
@@ -539,7 +601,15 @@ Respond in this JSON format:
                             'is_preferred': col_data.get('is_preferred', False),
                             'use_cases': col_data.get('use_cases', []),
                             'relevance_keywords': col_data.get('relevance_keywords', [])
-                        })
+                        }
+                        available_columns.append(column_metadata)
+                        
+                        # 🔍 LOG PRIORITY FIELDS: Log priority fields being used by agent
+                        if any([column_metadata['priority'] != 'medium', 
+                               column_metadata['business_description'], 
+                               column_metadata['business_terms'], 
+                               column_metadata['is_preferred']]):
+                            print(f"🔍 INTENT PICKER PRIORITY: {table}.{col_name}: {column_metadata}")
                 
                 # Method 1: Check user preferences first
                 preferred_columns = self._get_preferred_columns(user_question, user_preferences, available_columns)
@@ -751,25 +821,103 @@ Respond in this JSON format:
         
         return "\n".join(overview_parts)
     
+    def _build_knowledge_overview_with_semantic_context(self, knowledge_data: Dict[str, Any], question: str) -> str:
+        """
+        Build a comprehensive schema overview with business context for description-driven reasoning.
+        This helps the LLM understand column descriptions and business context to make informed decisions.
+        """
+        if not knowledge_data or 'schema' not in knowledge_data:
+            return "No database schema information available."
+        
+        # Build natural schema overview from actual schema data
+        schema = knowledge_data.get('schema', {})
+        tables = schema.get('tables', {})
+        
+        # Handle both dict and list formats for tables
+        if isinstance(tables, dict):
+            tables_list = tables
+        elif isinstance(tables, list):
+            tables_list = {table.get('name', f'table_{i}'): table for i, table in enumerate(tables)}
+        else:
+            tables_list = {}
+        
+        overview_parts = ["Available Database Schema with Business Context:"]
+        
+        # Add database-level metrics if available and relevant to the question
+        if 'metrics' in schema and schema['metrics']:
+            question_lower = question.lower() if question else ""
+            metrics_keywords = ['average', 'avg', 'sum', 'count', 'total', 'maximum', 'max', 'minimum', 'min', 'metric', 'score', 'rate', 'ratio', 'percentage', '%']
+            
+            if any(keyword in question_lower for keyword in metrics_keywords):
+                overview_parts.append("\nAvailable Database Metrics:")
+                for metric in schema['metrics']:
+                    if isinstance(metric, dict):
+                        metric_name = metric.get('name', 'Unknown')
+                        metric_expression = metric.get('expression', 'Unknown')
+                        overview_parts.append(f"  - {metric_name}: {metric_expression}")
+                    else:
+                        overview_parts.append(f"  - {metric}")
+        
+        for table_name, table_data in tables_list.items():
+            if isinstance(table_data, dict):
+                columns = table_data.get('columns', {})
+                overview_parts.append(f"\n{table_name}:")
+                
+                if isinstance(columns, dict):
+                    for col_name, col_data in columns.items():
+                        if isinstance(col_data, dict):
+                            col_type = col_data.get('type', col_data.get('data_type', 'Unknown'))
+                            
+                            # Build comprehensive context information
+                            context_parts = []
+                            
+                            # Description (primary business context)
+                            description = col_data.get('description', '')
+                            if description:
+                                context_parts.append(f"Description: \"{description}\"")
+                                print(f"🔍 FOUND DESCRIPTION: {col_name} -> {description}")
+                            else:
+                                print(f"⚠️  NO DESCRIPTION: {col_name}")
+                            
+                            # Business terms (alternative terms)
+                            business_terms = col_data.get('business_terms', [])
+                            if business_terms:
+                                context_parts.append(f"Business Terms: {business_terms}")
+                                print(f"🔍 FOUND BUSINESS TERMS: {col_name} -> {business_terms}")
+                            
+                            # Use cases (typical usage scenarios)
+                            use_cases = col_data.get('use_cases', [])
+                            if use_cases:
+                                context_parts.append(f"Typical Use Cases: {use_cases}")
+                                print(f"🔍 FOUND USE CASES: {col_name} -> {use_cases}")
+                            
+                            # Build the context string
+                            context_str = " | ".join(context_parts) if context_parts else "No additional context"
+                            
+                            # Format: column_name (type) - CONTEXT: Description | Business Terms | Use Cases
+                            overview_parts.append(f"  - {col_name} ({col_type})")
+                            overview_parts.append(f"    - CONTEXT: {context_str}")
+        
+        return "\n".join(overview_parts)
+    
     # Helper methods for sophisticated logic
-    def _find_similar_tables(self, table: str, knowledge_data: Dict) -> List[str]:
+    def _find_similar_tables(self, table: str, schema_tables: Dict) -> List[str]:
         """Find similar table names using sophisticated matching."""
         similar_tables = []
-        for key in knowledge_data.keys():
-            if key.startswith("table:"):
-                table_name = key.split(":", 1)[1]
-                if self._is_similar(table, table_name):
-                    similar_tables.append(table_name)
+        for table_name in schema_tables.keys():
+            if self._is_similar(table, table_name):
+                similar_tables.append(table_name)
         return similar_tables
     
-    def _find_similar_columns(self, column: str, knowledge_data: Dict) -> List[str]:
+    def _find_similar_columns(self, column: str, schema_tables: Dict) -> List[str]:
         """Find similar column names using sophisticated matching."""
         similar_columns = []
-        for key in knowledge_data.keys():
-            if key.startswith("column:"):
-                column_name = key.split(":", 1)[1]
-                if self._is_similar(column, column_name):
-                    similar_columns.append(column_name)
+        for table_name, table_data in schema_tables.items():
+            if isinstance(table_data, dict):
+                columns = table_data.get('columns', {})
+                for column_name in columns.keys():
+                    if self._is_similar(column, column_name):
+                        similar_columns.append(column_name)
         return similar_columns
     
     def _is_similar(self, str1: str, str2: str) -> bool:

@@ -307,6 +307,11 @@ STRICT RULES (MANDATORY):
 6) Use only objects present in the clipped context. If an object seems missing, prefer keeping original and fixing syntax around it.
 7) Follow {db_type.upper()} dialect strictly.
 
+SQL SERVER SPECIFIC SYNTAX:
+- Use "ORDER BY column DESC OFFSET 0 ROWS FETCH NEXT N ROWS ONLY" instead of "LIMIT N"
+- Use "TOP N" for simple row limiting without ORDER BY
+- Use square brackets for identifiers: [TableName], [ColumnName]
+
 Output: Return ONLY the minimally corrected SQL text, no commentary or markdown fences. If refusing per rule (5), return the original SQL verbatim."""
 
             print(f"[Query_Validator] Attempting to fix SQL with LLM...")

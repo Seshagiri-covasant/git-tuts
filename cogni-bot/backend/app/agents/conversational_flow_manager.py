@@ -288,7 +288,7 @@ class ConversationalFlowManager:
         except Exception as e:
             self.logger.error(f"Error generating final SQL query: {e}")
             print(f"Final SQL Generation Error: {e}")
-            return "SELECT * FROM table_name LIMIT 10;"
+            return "SELECT * FROM table_name;"
 
     def _load_conversation_memory(self, conversation_history: List[Dict]) -> None:
         """Load conversation history into memory."""

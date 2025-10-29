@@ -2,16 +2,20 @@ from ..utils.exceptions import QueryGenerationException
 from sqlalchemy import inspect, text
 from ..utils.prompt_loader import get_prompt
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 
 class QueryGeneratorAgent:
-    def __init__(self, llm, app_db_util=None, prompt_template=None, chatbot_db_util=None, chatbot_id: str | None = None):
+    def __init__(self, llm, app_db_util=None, prompt_template=None, chatbot_db_util=None, chatbot_id: str | None = None, learning_cache: Optional[Dict] = None):
         self.llm = llm
         self.app_db_util = app_db_util  # For application DB (query execution)
         # For chatbot data (chat_bot.db)
         self.chatbot_db_util = chatbot_db_util
         self.chatbot_id = chatbot_id
+        self.learning_cache = learning_cache or {}
+        self.query_patterns = self.learning_cache.get('query_patterns', {})
+        self.successful_queries = self.learning_cache.get('successful_queries', [])
+        self.failed_queries = self.learning_cache.get('failed_queries', [])
         if not prompt_template:
             raise ValueError(
                 "No template provided. Please provide a template content.")
@@ -327,6 +331,271 @@ class QueryGeneratorAgent:
         preferences_text += "\nUse these preferences to guide your SQL generation approach and style."
         return preferences_text
 
+    def _learn_from_successful_query(self, question: str, sql: str, intent: Dict, schema_context: Dict):
+        """Learn from successful query patterns for future adaptation."""
+        try:
+            pattern_key = self._generate_query_pattern_key(question, intent)
+            
+            if pattern_key not in self.query_patterns:
+                self.query_patterns[pattern_key] = {
+                    'question_patterns': [],
+                    'sql_patterns': [],
+                    'intent_patterns': [],
+                    'success_count': 0,
+                    'last_used': None
+                }
+            
+            # Store the successful pattern
+            self.query_patterns[pattern_key]['question_patterns'].append(question)
+            self.query_patterns[pattern_key]['sql_patterns'].append(sql)
+            self.query_patterns[pattern_key]['intent_patterns'].append(intent)
+            self.query_patterns[pattern_key]['success_count'] += 1
+            self.query_patterns[pattern_key]['last_used'] = question
+            
+            # Add to successful queries list
+            self.successful_queries.append({
+                'question': question,
+                'sql': sql,
+                'intent': intent,
+                'timestamp': question  # Using question as timestamp placeholder
+            })
+            
+            # Update learning cache
+            self.learning_cache['query_patterns'] = self.query_patterns
+            self.learning_cache['successful_queries'] = self.successful_queries
+            
+            print(f"[QueryGenerator] Learned from successful query pattern: {pattern_key}")
+            
+        except Exception as e:
+            print(f"[QueryGenerator] Error learning from successful query: {e}")
+
+    def _learn_from_failed_query(self, question: str, error: str, intent: Dict):
+        """Learn from failed query patterns to avoid similar mistakes."""
+        try:
+            pattern_key = self._generate_query_pattern_key(question, intent)
+            
+            if pattern_key not in self.query_patterns:
+                self.query_patterns[pattern_key] = {
+                    'question_patterns': [],
+                    'sql_patterns': [],
+                    'intent_patterns': [],
+                    'success_count': 0,
+                    'failure_count': 0,
+                    'last_used': None
+                }
+            
+            # Track failure
+            if 'failure_count' not in self.query_patterns[pattern_key]:
+                self.query_patterns[pattern_key]['failure_count'] = 0
+            self.query_patterns[pattern_key]['failure_count'] += 1
+            
+            # Add to failed queries list
+            self.failed_queries.append({
+                'question': question,
+                'error': error,
+                'intent': intent,
+                'timestamp': question  # Using question as timestamp placeholder
+            })
+            
+            # Update learning cache
+            self.learning_cache['query_patterns'] = self.query_patterns
+            self.learning_cache['failed_queries'] = self.failed_queries
+            
+            print(f"[QueryGenerator] Learned from failed query pattern: {pattern_key}")
+            
+        except Exception as e:
+            print(f"[QueryGenerator] Error learning from failed query: {e}")
+
+    def _generate_query_pattern_key(self, question: str, intent: Dict) -> str:
+        """Generate a pattern key for learning cache."""
+        try:
+            # Create a key based on question structure and intent
+            question_words = question.lower().split()
+            intent_tables = intent.get('tables', [])
+            intent_columns = intent.get('columns', [])
+            
+            # Create a pattern key
+            pattern_parts = []
+            pattern_parts.append(f"tables_{len(intent_tables)}")
+            pattern_parts.append(f"columns_{len(intent_columns)}")
+            
+            # Add question type indicators
+            if any(word in question_words for word in ['count', 'how many', 'number']):
+                pattern_parts.append('count_query')
+            if any(word in question_words for word in ['average', 'mean', 'avg']):
+                pattern_parts.append('avg_query')
+            if any(word in question_words for word in ['sum', 'total']):
+                pattern_parts.append('sum_query')
+            if any(word in question_words for word in ['group', 'by', 'breakdown']):
+                pattern_parts.append('groupby_query')
+            
+            return "_".join(pattern_parts)
+            
+        except Exception as e:
+            print(f"[QueryGenerator] Error generating pattern key: {e}")
+            return "unknown_pattern"
+
+    def _find_similar_successful_patterns(self, question: str, intent: Dict) -> List[Dict]:
+        """Find similar successful query patterns for adaptation."""
+        try:
+            current_pattern_key = self._generate_query_pattern_key(question, intent)
+            similar_patterns = []
+            
+            for pattern_key, pattern_data in self.query_patterns.items():
+                if pattern_key == current_pattern_key:
+                    continue
+                
+                # Calculate similarity based on pattern structure
+                similarity_score = self._calculate_pattern_similarity(
+                    current_pattern_key, pattern_key, question, intent, pattern_data
+                )
+                
+                if similarity_score > 0.6:  # Threshold for similarity
+                    similar_patterns.append({
+                        'pattern_key': pattern_key,
+                        'pattern_data': pattern_data,
+                        'similarity_score': similarity_score
+                    })
+            
+            # Sort by similarity score
+            similar_patterns.sort(key=lambda x: x['similarity_score'], reverse=True)
+            return similar_patterns[:3]  # Return top 3 similar patterns
+            
+        except Exception as e:
+            print(f"[QueryGenerator] Error finding similar patterns: {e}")
+            return []
+
+    def _calculate_pattern_similarity(self, current_key: str, pattern_key: str, question: str, intent: Dict, pattern_data: Dict) -> float:
+        """Calculate similarity between current query and stored patterns."""
+        try:
+            similarity_score = 0.0
+            
+            # Compare pattern keys
+            current_parts = current_key.split('_')
+            pattern_parts = pattern_key.split('_')
+            
+            # Count matching parts
+            matching_parts = 0
+            for part in current_parts:
+                if part in pattern_parts:
+                    matching_parts += 1
+            
+            if len(current_parts) > 0:
+                similarity_score += (matching_parts / len(current_parts)) * 0.4
+            
+            # Compare question structure
+            current_words = set(question.lower().split())
+            for stored_question in pattern_data.get('question_patterns', []):
+                stored_words = set(stored_question.lower().split())
+                word_overlap = len(current_words.intersection(stored_words))
+                if len(current_words) > 0:
+                    word_similarity = word_overlap / len(current_words)
+                    similarity_score += word_similarity * 0.3
+                    break  # Use first stored question for comparison
+            
+            # Compare intent structure
+            current_tables = set(intent.get('tables', []))
+            current_columns = set(intent.get('columns', []))
+            
+            for stored_intent in pattern_data.get('intent_patterns', []):
+                stored_tables = set(stored_intent.get('tables', []))
+                stored_columns = set(stored_intent.get('columns', []))
+                
+                table_overlap = len(current_tables.intersection(stored_tables))
+                column_overlap = len(current_columns.intersection(stored_columns))
+                
+                if len(current_tables) > 0:
+                    table_similarity = table_overlap / len(current_tables)
+                    similarity_score += table_similarity * 0.15
+                
+                if len(current_columns) > 0:
+                    column_similarity = column_overlap / len(current_columns)
+                    similarity_score += column_similarity * 0.15
+                
+                break  # Use first stored intent for comparison
+            
+            return min(similarity_score, 1.0)  # Cap at 1.0
+            
+        except Exception as e:
+            print(f"[QueryGenerator] Error calculating pattern similarity: {e}")
+            return 0.0
+
+    def _build_adaptive_sql_prompt(self, question: str, intent: Dict, clipped: Dict, db_type: str, 
+                                 db_instructions: str, from_join_scaffold: str, 
+                                 similar_patterns: List[Dict]) -> str:
+        """Build an adaptive SQL generation prompt using learned patterns."""
+        try:
+            # Base prompt structure
+            base_prompt = f"""You are an advanced SQL query generator with adaptive learning capabilities. Your task is to convert natural language questions into SQL queries using schema-aware patterns and learned query structures.
+
+DATABASE TYPE: {db_type.upper()}
+{db_instructions}
+
+STRICT REQUIREMENTS:
+- Use ONLY the tables and columns provided in the context
+- If required tables/columns are not available, output exactly "NOT FOUND"
+- Never reference tables/columns outside the provided context
+- Preserve the FROM/JOIN SCAFFOLD exactly if provided
+
+INTENT ANALYSIS:
+Tables: {intent.get('tables', [])}
+Columns: {intent.get('columns', [])}
+Aggregations: {intent.get('aggregations', [])}
+Filters: {intent.get('filters', [])}
+Joins: {intent.get('joins', [])}
+Order By: {intent.get('order_by', [])}
+Date Range: {intent.get('date_range', [])}
+
+AVAILABLE CONTEXT:
+{clipped}
+
+FROM/JOIN SCAFFOLD (MANDATORY TO KEEP UNCHANGED):
+{from_join_scaffold if from_join_scaffold else '(no scaffold available)'}
+
+QUESTION: {question}"""
+
+            # Add learned patterns section if available
+            if similar_patterns:
+                patterns_section = "\n\nLEARNED PATTERNS (Use these as guidance):\n"
+                for i, pattern in enumerate(similar_patterns, 1):
+                    pattern_data = pattern['pattern_data']
+                    patterns_section += f"\nPattern {i} (Similarity: {pattern['similarity_score']:.2f}):\n"
+                    patterns_section += f"  Success Count: {pattern_data.get('success_count', 0)}\n"
+                    patterns_section += f"  Failure Count: {pattern_data.get('failure_count', 0)}\n"
+                    
+                    # Show recent successful SQL patterns
+                    recent_sqls = pattern_data.get('sql_patterns', [])[-2:]  # Last 2 SQLs
+                    for j, sql in enumerate(recent_sqls, 1):
+                        patterns_section += f"  Recent SQL {j}: {sql[:200]}...\n"
+                
+                base_prompt += patterns_section
+
+            # Add adaptive instructions
+            adaptive_instructions = """
+
+ADAPTIVE INSTRUCTIONS:
+1. Use the learned patterns as guidance for query structure and approach
+2. Adapt successful patterns to the current question context
+3. Avoid patterns that have high failure rates
+4. Consider the schema metadata for optimal column selection
+5. Use business patterns and AI preferences from the schema
+6. Generate syntactically correct SQL with proper error handling
+
+Generate the SQL query:"""
+
+            return base_prompt + adaptive_instructions
+
+        except Exception as e:
+            print(f"[QueryGenerator] Error building adaptive prompt: {e}")
+            # Fallback to basic prompt
+            return f"""You are a SQL query generator. Generate a valid {db_type.upper()} SQL query for:
+
+QUESTION: {question}
+INTENT: {intent}
+CONTEXT: {clipped}
+
+Generate the SQL query:"""
+
     def run(self, state: Dict[str, Any], app_db_util=None, chatbot_db_util=None):
         try:
             # Use passed-in db utils if provided, else use instance
@@ -378,6 +647,17 @@ class QueryGeneratorAgent:
             # Final fallback: try to get question from state directly
             if question is None:
                 question = state.get("question") or state.get("user_question") or "No question found"
+
+            # 🔍 ENHANCED LOGGING: Track what data is being processed
+            print(f"\n{'='*80}")
+            print(f"🔍 ADAPTIVE QUERY GENERATOR: Schema-Aware SQL Generation")
+            print(f"{'='*80}")
+            print(f"📝 User Question: {question}")
+            print(f"📊 Learning Cache Size: {len(self.learning_cache)}")
+            print(f"🎯 Query Patterns: {len(self.query_patterns)}")
+            print(f"✅ Successful Queries: {len(self.successful_queries)}")
+            print(f"❌ Failed Queries: {len(self.failed_queries)}")
+            print(f"{'='*80}\n")
 
             # Detect database type
             db_type = self._get_database_type()
@@ -538,17 +818,25 @@ Output ONLY the final SQL query, no explanations."""
             clipped_limited['relationships'] = relationships[:relationship_limit]
             clipped_text = f"CLIPPED CONTEXT: {clipped_limited}"
             
-            # Build prompt once with appropriate relationship limit
-            enhanced_prompt = f"""You are a SQL query generator. Your task is to convert natural language questions into SQL queries.
+            # Find similar successful patterns for adaptive learning
+            similar_patterns = self._find_similar_successful_patterns(question, intent)
+            
+            # Build adaptive prompt using learned patterns
+            enhanced_prompt = self._build_adaptive_sql_prompt(
+                question, intent, clipped_limited, db_type, db_instructions, 
+                from_join_scaffold, similar_patterns
+            )
+            
+            # Add the original template and additional sections
+            enhanced_prompt += f"""
+
 {self.prompt_template}
-DATABASE TYPE: {db_type.upper()}
-{db_instructions}
 
 STRICT REQUIREMENTS:
 - Use ONLY these tables: {allowed_tables_str if allowed_tables_str else 'None'}
 - If required tables/columns are not available, output exactly "NOT FOUND"
 - Never reference tables/columns outside the provided context
- - Preserve the FROM/JOIN SCAFFOLD exactly if provided (do not delete or alter JOIN order).
+- Preserve the FROM/JOIN SCAFFOLD exactly if provided (do not delete or alter JOIN order).
 
 INTENT ANALYSIS:
 {intent_text}
@@ -556,19 +844,30 @@ INTENT ANALYSIS:
 AVAILABLE CONTEXT:
 {clipped_text}
 
- FROM/JOIN SCAFFOLD (MANDATORY TO KEEP UNCHANGED):
- {from_join_scaffold if from_join_scaffold else '(no scaffold available)'}
+FROM/JOIN SCAFFOLD (MANDATORY TO KEEP UNCHANGED):
+{from_join_scaffold if from_join_scaffold else '(no scaffold available)'}
 
 QUESTION: {question}
 
 INSTRUCTIONS:
- 1. Analyze the question and intent to understand what data is needed
- 2. Use the provided FROM/JOIN SCAFFOLD verbatim (do not change it). If no scaffold shown, you must include a correct FROM base table and JOIN ... ON ... blocks.
- 3. Add SELECT (with qualified columns), WHERE (if filters exist), GROUP BY (for any non-aggregated columns), ORDER BY, and LIMIT as needed.
- 4. Generate syntactically correct {db_type.upper()} SQL.
- 5. Use proper table aliases for clarity and qualify all columns.
- 6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
- 7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
+1. Analyze the question and intent to understand what data is needed
+2. Use the provided FROM/JOIN SCAFFOLD verbatim (do not change it). If no scaffold shown, you must include a correct FROM base table and JOIN ... ON ... blocks.
+3. Add SELECT (with qualified columns), WHERE (if filters exist), GROUP BY (for any non-aggregated columns), ORDER BY, and row limiting as needed.
+4. Generate syntactically correct {db_type.upper()} SQL.
+5. Use proper table aliases for clarity and qualify all columns.
+6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
+7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
+8. ROW LIMITING SYNTAX BY DATABASE:
+   - For MSSQL: Use "ORDER BY column DESC OFFSET 0 ROWS FETCH NEXT N ROWS ONLY" instead of LIMIT
+   - For MySQL/PostgreSQL: Use "LIMIT N"
+   - For BigQuery: Use "LIMIT N"
+   - For SQLite: Use "LIMIT N"
+
+TOP QUERY HANDLING:
+- When the question contains "top" , automatically add row limiting
+- Default to TOP 10 if no specific number is mentioned.
+- If a specific number is mentioned , use that number
+- Always include ORDER BY with DESC for "top" queries to get the highest values first
 
 DYNAMIC AGGREGATION PATTERNS:
 {self._build_aggregation_patterns_section(aggregation_patterns, question)}
@@ -652,6 +951,13 @@ Generate the SQL query:"""
             # DECISION TRANSPARENCY: Structured decision trace
             decision_trace = self._build_query_decision_trace(question, sql, intent, clipped)
 
+            # Learn from this successful query generation
+            try:
+                self._learn_from_successful_query(question, sql, intent, clipped_limited)
+                print(f"[QueryGenerator] Successfully learned from query generation")
+            except Exception as e:
+                print(f"[QueryGenerator] Error learning from successful query: {e}")
+
             # CRITICAL FIX: Store SQL in multiple places for different agents to find
             return {
                 "messages": [sql],
@@ -661,9 +967,17 @@ Generate the SQL query:"""
                 "query": sql,  # Add this for query validator/executor
                 "final_sql": sql,  # Add this for query validator/executor
                 "agent_thoughts": agent_thoughts,
-                "decision_trace": decision_trace
+                "decision_trace": decision_trace,
+                "learning_cache": self.learning_cache  # Pass learning cache to other agents
             }
         except Exception as e:
+            # Learn from failed query generation
+            try:
+                self._learn_from_failed_query(question, str(e), intent)
+                print(f"[QueryGenerator] Learned from failed query generation")
+            except Exception as learn_error:
+                print(f"[QueryGenerator] Error learning from failed query: {learn_error}")
+            
             raise QueryGenerationException(e)
     
     def _generate_query_thoughts(self, question: str, sql: str, intent: Dict[str, Any], clipped: Dict[str, Any]) -> str:

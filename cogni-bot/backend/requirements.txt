@@ -35,3 +35,4 @@ pandas
 openpyxl
 xlrd
 cryptography>=3.4.8
+spacy

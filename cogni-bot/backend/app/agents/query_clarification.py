@@ -32,9 +32,9 @@ class ConversationalClarificationAgent:
             print(f"[ConversationalClarification] Processing: {user_question}")
             print(f"[ConversationalClarification] Conversation history: {len(conversation_history)} messages")
             
-            # Check if ConversationalIntentAnalyzer already determined clarification is needed
+            # Check if HumanApprovalAgent determined clarification is needed
             if state.get('clarification_needed', False):
-                print(f"[ConversationalClarification] ConversationalIntentAnalyzer already determined clarification needed")
+                print(f"[ConversationalClarification] HumanApprovalAgent already determined clarification needed")
                 return {
                     **state,
                     'clarification_needed': True,

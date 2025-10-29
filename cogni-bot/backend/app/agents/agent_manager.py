@@ -13,7 +13,6 @@ from .query_validator import QueryValidatorAgent
 from .query_executor import QueryExecutor
 from .answer_rephraser import AnswerRephraser
 from .domain_relevance_checker import DomainRelevanceCheckerAgent
-from .conversational_intent_analyzer import ConversationalIntentAnalyzer
 from .conversational_memory_manager import ConversationalMemoryManager
 from .human_approval_agent import HumanApprovalAgent
 from .planner import Planner
@@ -116,7 +115,6 @@ class AgentManager:
         # Core agents
         domain_relevance_checker = DomainRelevanceCheckerAgent(self.llm, chatbot_db_util=self.chatbot_db_util)
         intent_picker = AdvancedIntentPicker(self.llm)
-        conversational_intent_analyzer = ConversationalIntentAnalyzer(self.llm)
         query_clarification = ConversationalClarificationAgent(self.llm, chatbot_db_util=self.chatbot_db_util)
         context_clipper = ConversationalContextClipper(self.llm)
         query_generator = QueryGeneratorAgent(
@@ -143,7 +141,6 @@ class AgentManager:
             app_db_util=self.db_util,
             chatbot_db_util=self.chatbot_db_util,
             chatbot_id=self.chatbot_id,
-            conversational_intent_analyzer=conversational_intent_analyzer,
             human_approval_agent=human_approval_agent
         )
         self.graph = self.planner.graph
@@ -358,11 +355,12 @@ class AgentManager:
                 "initializing": 10,
                 "preparing": 20,
                 "Intent_Picker": 30,
-                "Query_Clarification": 40,
-                "Context_Clipper": 50,
-                "Query_Generator": 65,
-                "Query_Cleaner": 75,
-                "Query_Validator": 85,
+                "Human_Approval": 40,
+                "Query_Clarification": 50,
+                "Context_Clipper": 60,
+                "Query_Generator": 75,
+                "Query_Cleaner": 85,
+                "Query_Validator": 90,
                 "Query_Executor": 95,
                 "Answer_Rephraser": 98,
             }
@@ -379,6 +377,8 @@ class AgentManager:
                     progress = progress_map[node_name]
                     if node_name == "Intent_Picker":
                         self.update_processing_status("analyzing", progress, "Identifying intent and relevant entities...")
+                    elif node_name == "Human_Approval":
+                        self.update_processing_status("approval", progress, "Checking if human approval is needed...")
                     elif node_name == "Query_Clarification":
                         self.update_processing_status("clarifying", progress, "Checking if question needs clarification...")
                     elif node_name == "Context_Clipper":
@@ -567,7 +567,7 @@ class AgentManager:
             "details": {
                 "conversationHistory": f"Retrieved {len(conversation_history)} messages from LangChain memory",
                 "memoryWorking": len(conversation_history) > 0,
-                "conversationContext": [f"{msg.__class__.__name__}: {msg.content[:100]}..." for msg in conversation_history[-3:]] if conversation_history else [],
+                "conversationContext": [f"{msg.__class__.__name__}: {getattr(msg, 'content', str(msg))[:100]}..." for msg in conversation_history[-5:]] if conversation_history else [],
                 "memoryType": "ConversationBufferMemory"
             },
             "timestamp": datetime.utcnow().isoformat()

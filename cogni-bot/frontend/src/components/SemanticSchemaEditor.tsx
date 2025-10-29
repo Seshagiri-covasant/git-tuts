@@ -410,7 +410,7 @@ const ColumnEditor = React.memo<{
             <TextAreaInput
               defaultValue={column.description || ''}
               onCommit={(value) => onFieldChange('description', value)}
-              placeholder="Business-friendly description (e.g., Comprehensive risk assessment combining all risk factors)"
+              placeholder="Business-friendly description"
               rows={2}
               fieldKey={`${column.id}-description`}
             />

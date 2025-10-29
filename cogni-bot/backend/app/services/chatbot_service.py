@@ -566,8 +566,8 @@ def get_semantic_schema_service(chatbot_id: str):
             "No semantic schema found for this chatbot", 404)
     
     # 🔍 DEBUG: Log the raw JSON to see what's being loaded
-    print(f"🔍 RAW SCHEMA JSON: {semantic_schema_json[:500]}...")
-    print(f"🔍 SCHEMA JSON LENGTH: {len(semantic_schema_json)}")
+    print(f" RAW SCHEMA JSON: {semantic_schema_json[:500]}...")
+    print(f" SCHEMA JSON LENGTH: {len(semantic_schema_json)}")
 
     try:
         # Parse the JSON string first, then validate with Pydantic
@@ -575,7 +575,7 @@ def get_semantic_schema_service(chatbot_id: str):
         semantic_schema_data = json.loads(semantic_schema_json)
         
         # 🔍 DEBUG: Check what priority fields are in the loaded schema
-        print("🔍 LOADED SCHEMA DEBUG: Checking loaded schema for priority fields...")
+        print(" LOADED SCHEMA DEBUG: Checking loaded schema for priority fields...")
         for table_name, table_data in semantic_schema_data.get('tables', {}).items():
             if isinstance(table_data, dict) and 'columns' in table_data:
                 for col_name, col_data in table_data['columns'].items():
@@ -591,7 +591,7 @@ def get_semantic_schema_service(chatbot_id: str):
                         }
                         # Only log if any priority fields are present
                         if any(priority_fields.values()):
-                            print(f"🔍 LOADED PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+                            print(f" LOADED PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
 
         # ---------------- Normalization for legacy/new mixed schemas ---------------- #
         def _normalize_inbound_schema(data: dict) -> dict:
@@ -765,14 +765,14 @@ def update_semantic_schema_service(chatbot_id: str):
     print(f"Metrics data: {semantic_schema_data.get('metrics', [])}")
     
     # 🔍 LOG PRIORITY FIELDS: Check for priority fields in incoming schema
-    print("🔍 PRIORITY FIELDS DEBUG: Checking incoming schema for priority fields...")
-    print(f"🔍 SCHEMA KEYS: {list(semantic_schema_data.keys())}")
-    print(f"🔍 TABLES COUNT: {len(semantic_schema_data.get('tables', {}))}")
+    print(" PRIORITY FIELDS DEBUG: Checking incoming schema for priority fields...")
+    print(f" SCHEMA KEYS: {list(semantic_schema_data.keys())}")
+    print(f" TABLES COUNT: {len(semantic_schema_data.get('tables', {}))}")
     
     priority_fields_found = False
     for table_name, table_data in semantic_schema_data.get('tables', {}).items():
         if isinstance(table_data, dict) and 'columns' in table_data:
-            print(f"🔍 TABLE {table_name}: {len(table_data['columns'])} columns")
+            print(f" TABLE {table_name}: {len(table_data['columns'])} columns")
             for col_name, col_data in table_data['columns'].items():
                 if isinstance(col_data, dict):
                     priority_fields = {
@@ -786,12 +786,12 @@ def update_semantic_schema_service(chatbot_id: str):
                     }
                     # Only log if any priority fields are present
                     if any(priority_fields.values()):
-                        print(f"🔍 PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+                        print(f" PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
                         priority_fields_found = True
     
     if not priority_fields_found:
-        print("🔍 NO PRIORITY FIELDS FOUND IN INCOMING SCHEMA!")
-        print("🔍 This means the frontend is not sending priority fields")
+        print(" NO PRIORITY FIELDS FOUND IN INCOMING SCHEMA!")
+        print(" This means the frontend is not sending priority fields")
         
         # Show sample column data to debug
         for table_name, table_data in semantic_schema_data.get('tables', {}).items():
@@ -895,13 +895,13 @@ def update_semantic_schema_service(chatbot_id: str):
                         }
                         # Only log if any priority fields are present
                         if any(priority_fields.values()):
-                            print(f"🔍 PRE-VALIDATION PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+                            print(f" PRE-VALIDATION PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
         
         semantic_schema = DatabaseSchema.model_validate(semantic_schema_data)
         logger.info(f"Schema validation successful for chatbot {chatbot_id}")
         
         # 🔍 DEBUG: Check what priority fields are in the validated model
-        print("🔍 POST-VALIDATION DEBUG: Checking priority fields after Pydantic validation...")
+        print(" POST-VALIDATION DEBUG: Checking priority fields after Pydantic validation...")
         for table_name, table_data in semantic_schema.tables.items():
             for col_name, col_data in table_data.columns.items():
                 priority_fields = {
@@ -915,7 +915,7 @@ def update_semantic_schema_service(chatbot_id: str):
                 }
                 # Only log if any priority fields are present
                 if any(priority_fields.values()):
-                    print(f"🔍 POST-VALIDATION PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+                    print(f" POST-VALIDATION PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
         
         # Enforce business rule: the schema's ID must match the chatbot's ID
         if semantic_schema.id != chatbot_id:
@@ -950,10 +950,10 @@ def update_semantic_schema_service(chatbot_id: str):
         
         # 🔍 LOGGING: Track database storage result
         if success:
-            print(f"✅ Schema successfully updated in database for chatbot {chatbot_id}")
+            print(f" Schema successfully updated in database for chatbot {chatbot_id}")
             
             # 🔍 LOG PRIORITY FIELDS: Verify what was actually stored
-            print("🔍 PRIORITY FIELDS DEBUG: Verifying stored schema contains priority fields...")
+            print(" PRIORITY FIELDS DEBUG: Verifying stored schema contains priority fields...")
             try:
                 stored_schema = json.loads(semantic_schema_json)
                 for table_name, table_data in stored_schema.get('tables', {}).items():
@@ -971,11 +971,11 @@ def update_semantic_schema_service(chatbot_id: str):
                                 }
                                 # Only log if any priority fields are present
                                 if any(priority_fields.values()):
-                                    print(f"🔍 STORED PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
+                                    print(f" STORED PRIORITY FIELDS: {table_name}.{col_name}: {priority_fields}")
             except Exception as e:
-                print(f"🔍 ERROR: Could not verify stored priority fields: {e}")
+                print(f" ERROR: Could not verify stored priority fields: {e}")
         else:
-            print(f"❌ Failed to update schema in database for chatbot {chatbot_id}")
+            print(f" Failed to update schema in database for chatbot {chatbot_id}")
         
         # Rebuild knowledge cache with updated schema
         if success:

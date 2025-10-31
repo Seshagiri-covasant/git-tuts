@@ -45,7 +45,16 @@ class QueryGeneratorAgent:
                 return []
 
             inspector = inspect(self.app_db_util.db_engine)
-            table_names = inspector.get_table_names()
+            # Respect selected schema for engines that support schemas (mssql/postgresql)
+            selected_schema = self._get_selected_schema_name()
+            try:
+                if selected_schema:
+                    table_names = inspector.get_table_names(schema=selected_schema)
+                else:
+                    table_names = inspector.get_table_names()
+            except TypeError:
+                # Some dialects don't accept schema kw; fallback
+                table_names = inspector.get_table_names()
             return table_names
         except Exception as e:
             logging.info(f"Error getting table names: {e}")
@@ -90,6 +99,8 @@ class QueryGeneratorAgent:
         # Prepare table list based on database type
         if db_type == "bigquery":
             table_list = ", ".join([f'`{table}`' for table in actual_tables]) if actual_tables else "No tables found"
+        elif db_type == "mssql":
+            table_list = ", ".join([f'[{table}]' for table in actual_tables]) if actual_tables else "No tables found"
         else:
             table_list = ", ".join([f'"{table}"' for table in actual_tables]) if actual_tables else "No tables found"
         
@@ -804,8 +815,13 @@ Output ONLY the final SQL query, no explanations."""
 
             from_join_scaffold = _build_from_join_scaffold()
 
-            # Derive allowed tables strictly from clipped context to prevent drift
+            # Derive allowed tables; if clipped lacks tables, merge actual DB tables as a fallback (schema-scoped)
             allowed_tables = sorted(list((clipped.get('tables') or {}).keys()))
+            if not allowed_tables:
+                try:
+                    allowed_tables = self._get_actual_table_names() or []
+                except Exception:
+                    allowed_tables = []
             allowed_tables_str = ", ".join([f'"{t}"' for t in allowed_tables]) if allowed_tables else ""
 
             # Determine relationship limit based on prompt size estimation
@@ -821,6 +837,49 @@ Output ONLY the final SQL query, no explanations."""
             # Find similar successful patterns for adaptive learning
             similar_patterns = self._find_similar_successful_patterns(question, intent)
             
+            # Special deterministic path: handle schema listing questions without LLM
+            def _is_list_tables_question(q: str) -> bool:
+                if not isinstance(q, str):
+                    return False
+                ql = q.lower()
+                triggers = [
+                    "what are the tables",
+                    "list tables",
+                    "show tables",
+                    "available tables",
+                    "tables in the database",
+                ]
+                return any(t in ql for t in triggers)
+
+            if _is_list_tables_question(question):
+                selected_schema = self._get_selected_schema_name()
+                if db_type == "mssql":
+                    base = "SELECT TABLE_SCHEMA AS SchemaName, TABLE_NAME AS TableName FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE'"
+                    if selected_schema:
+                        base += " AND TABLE_SCHEMA = :schema"
+                    base += " ORDER BY TABLE_SCHEMA, TABLE_NAME";
+                    sql = base
+                elif db_type == "postgresql":
+                    base = "SELECT table_schema AS schema_name, table_name FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')"
+                    if selected_schema:
+                        base += " AND table_schema = :schema"
+                    base += " ORDER BY table_schema, table_name";
+                    sql = base
+                else:
+                    # Generic fallback
+                    sql = "SELECT 1 WHERE 1=0"  # harmless noop
+
+                print(f"[Query_Generator] Deterministic list-tables SQL: {sql}")
+                return {
+                    "messages": [sql],
+                    "generated_sql": sql,
+                    "sql_query": sql,
+                    "sql": sql,
+                    "query": sql,
+                    "final_sql": sql,
+                    "learning_cache": self.learning_cache
+                }
+
             # Build adaptive prompt using learned patterns
             enhanced_prompt = self._build_adaptive_sql_prompt(
                 question, intent, clipped_limited, db_type, db_instructions, 
@@ -836,7 +895,7 @@ STRICT REQUIREMENTS:
 - Use ONLY these tables: {allowed_tables_str if allowed_tables_str else 'None'}
 - If required tables/columns are not available, output exactly "NOT FOUND"
 - Never reference tables/columns outside the provided context
-- Preserve the FROM/JOIN SCAFFOLD exactly if provided (do not delete or alter JOIN order).
+ - Preserve the FROM/JOIN SCAFFOLD exactly if provided (do not delete or alter JOIN order).
 
 INTENT ANALYSIS:
 {intent_text}
@@ -844,24 +903,24 @@ INTENT ANALYSIS:
 AVAILABLE CONTEXT:
 {clipped_text}
 
-FROM/JOIN SCAFFOLD (MANDATORY TO KEEP UNCHANGED):
-{from_join_scaffold if from_join_scaffold else '(no scaffold available)'}
+ FROM/JOIN SCAFFOLD (MANDATORY TO KEEP UNCHANGED):
+ {from_join_scaffold if from_join_scaffold else '(no scaffold available)'}
 
 QUESTION: {question}
 
 INSTRUCTIONS:
-1. Analyze the question and intent to understand what data is needed
-2. Use the provided FROM/JOIN SCAFFOLD verbatim (do not change it). If no scaffold shown, you must include a correct FROM base table and JOIN ... ON ... blocks.
-3. Add SELECT (with qualified columns), WHERE (if filters exist), GROUP BY (for any non-aggregated columns), ORDER BY, and row limiting as needed.
-4. Generate syntactically correct {db_type.upper()} SQL.
-5. Use proper table aliases for clarity and qualify all columns.
-6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
-7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
-8. ROW LIMITING SYNTAX BY DATABASE:
-   - For MSSQL: Use "ORDER BY column DESC OFFSET 0 ROWS FETCH NEXT N ROWS ONLY" instead of LIMIT
-   - For MySQL/PostgreSQL: Use "LIMIT N"
-   - For BigQuery: Use "LIMIT N"
-   - For SQLite: Use "LIMIT N"
+ 1. Analyze the question and intent to understand what data is needed
+ 2. Use the provided FROM/JOIN SCAFFOLD verbatim (do not change it). If no scaffold shown, you must include a correct FROM base table and JOIN ... ON ... blocks.
+ 3. Add SELECT (with qualified columns), WHERE (if filters exist), GROUP BY (for any non-aggregated columns), ORDER BY, and row limiting as needed.
+ 4. Generate syntactically correct {db_type.upper()} SQL.
+ 5. Use proper table aliases for clarity and qualify all columns.
+ 6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
+ 7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
+ 8. ROW LIMITING SYNTAX BY DATABASE:
+    - For MSSQL: Use "ORDER BY column DESC OFFSET 0 ROWS FETCH NEXT N ROWS ONLY" instead of LIMIT
+    - For MySQL/PostgreSQL: Use "LIMIT N"
+    - For BigQuery: Use "LIMIT N"
+    - For SQLite: Use "LIMIT N"
 
 TOP QUERY HANDLING:
 - When the question contains "top" , automatically add row limiting

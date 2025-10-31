@@ -14,6 +14,13 @@ def create_conversation(chatbot_id):
     }), 201
 
 
+@app.route("/conversations/start", methods=["POST"])
+def start_conversation():
+    """Creates a conversation by chatbot_id and optionally processes the first message."""
+    result = conversation_service.start_conversation_service()
+    return jsonify(result), 201
+
+
 @app.route("/chatbots/<chatbot_id>/conversations", methods=["GET"])
 def get_conversations(chatbot_id):
     conversations = conversation_service.get_conversations_for_chatbot_service(
@@ -79,6 +86,14 @@ def get_conversation_status(conversation_id):
     status = conversation_service.get_conversation_status_service(
         conversation_id)
     return jsonify(status)
+
+
+@app.route("/interactions/start", methods=["POST"])
+def start_unified_interaction():
+    """Unified entry point: resolves chatbot via clientId/projectId or chatbot_id and processes a message."""
+    result = conversation_service.start_unified_interaction_service()
+    return jsonify(result), 201
+
 
 
 # --- Result paging endpoints ---

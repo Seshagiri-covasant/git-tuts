@@ -175,3 +175,29 @@ class ConnectionTestSchema(Schema):
     project_id = fields.String()
     dataset_id = fields.String()
     credentials_json = fields.String()
+
+# --- New schemas for registration and unified interaction ---
+class ChatbotRegisterSchema(Schema):
+    clientId = fields.String(required=True)
+    projectId = fields.String(required=True)
+
+class UnifiedInteractionSchema(Schema):
+    chatbot_id = fields.String(required=False, allow_none=True)
+    clientId = fields.String(required=False, allow_none=True)
+    projectId = fields.String(required=False, allow_none=True)
+    message = fields.String(required=True)
+    conversation_id = fields.String(required=False, allow_none=True)
+
+
+class FollowUpQuestionSchema(Schema):
+    question_id = fields.String(required=True, description="Unique identifier for the follow-up question")
+    question = fields.String(required=True, description="The follow-up question text")
+    answer_options = fields.List(fields.String(), required=True, description="List of possible answers for the follow-up question")
+    multiple_selection = fields.Boolean(required=False, missing=False, description="Indicates if multiple answers can be selected")
+    answers = fields.List(fields.String(), required=False, allow_none=True, description="The answers selected by the user")
+
+class FollowUpResponseSchema(Schema):
+    follow_up_questions = fields.List(fields.Nested(FollowUpQuestionSchema), required=False, allow_none=True)
+    interaction_type = fields.String(required=True, description="Type of interaction: 'follow_up', 'clarification', 'human_approval', or 'final_result'")
+    message = fields.String(required=False, description="Additional message to display to user")
+

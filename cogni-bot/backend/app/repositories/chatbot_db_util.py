@@ -6,6 +6,8 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, func
 import json
 from sqlalchemy import inspect
+import gzip
+import base64
 import math
 import logging
 import time
@@ -59,6 +61,10 @@ class ChatbotDbUtil:
             self.custom_tests_table = self.create_custom_tests_table()
             self.chatbot_prompt_table = self.create_chatbot_prompt_table()
         self.initialize_tables()
+
+    
+        
+ 
 
     def initialize_tables(self):
         """
@@ -185,6 +191,9 @@ class ChatbotDbUtil:
                    nullable=False),  # LLM temperature setting
             # Changed from String to DateTime for PostgreSQL
             Column("created_at", DateTime, server_default=func.now()),
+            # --- External mapping fields for orchestration ---
+            Column("client_id", String(255), nullable=True),
+            Column("project_id", String(255), nullable=True),
             # <-- Added status column
             Column("status", String(50), nullable=True),
             Column("template_id", Integer, nullable=True),
@@ -404,7 +413,7 @@ class ChatbotDbUtil:
         except Exception as e:
             raise Exception(f"Error fetching all chatbots: {e}")
 
-    def update_chatbot(self, chatbot_id, db_type=None, db_url=None, schema_name=None, selected_tables=None, current_llm_name=None, status=None, template_id=None, efficiency=None, temperature=None, industry=None, vertical=None, domain=None, knowledge_base_file=None, credentials_json=None, llm_key_settings=None):
+    def update_chatbot(self, chatbot_id, db_type=None, db_url=None, schema_name=None, selected_tables=None, current_llm_name=None, status=None, template_id=None, efficiency=None, temperature=None, industry=None, vertical=None, domain=None, knowledge_base_file=None, credentials_json=None, llm_key_settings=None, client_id=None, project_id=None):
         """
         Updates a chatbot's database connection info, LLM settings, status, default template, efficiency, temperature, and knowledge base settings.
         """
@@ -443,6 +452,11 @@ class ChatbotDbUtil:
                 # Support persisting per-chatbot LLM key settings JSON
                 if llm_key_settings is not None:
                     update_values["llm_key_settings"] = llm_key_settings
+                # Support attaching external mapping identifiers
+                if client_id is not None:
+                    update_values["client_id"] = client_id
+                if project_id is not None:
+                    update_values["project_id"] = project_id
 
                 print(f"DEBUG: update_values to be set: {update_values}")
                 if update_values:
@@ -466,6 +480,20 @@ class ChatbotDbUtil:
         except Exception as e:
             print(f"DEBUG: Exception in update_chatbot: {e}")
             raise Exception(f"Error updating chatbot: {e}")
+
+    def find_chatbot_by_external_ids(self, client_id: str, project_id: str):
+        """Fetches a chatbot using the clientId and projectId mapping (used by orchestration)."""
+        try:
+            with self.db_engine.connect() as connection:
+                query = (
+                    self.chatbots_table.select()
+                    .where(self.chatbots_table.c.client_id == client_id)
+                    .where(self.chatbots_table.c.project_id == project_id)
+                )
+                result = connection.execute(query).fetchone()
+                return dict(result._mapping) if result else None
+        except Exception as e:
+            raise Exception(f"Error finding chatbot by external IDs: {e}")
 
     def delete_chatbot(self, chatbot_id):
         """
@@ -669,6 +697,148 @@ class ChatbotDbUtil:
             Column("rows_gzip_base64", Text, nullable=False),
             Column("created_at", DateTime, server_default=func.now())
         )
+
+    # ===== Paged interaction result storage APIs =====
+    def store_interaction_result(self, interaction_id: str, rows, columns, page_size: int = 500):
+        """Stores an interaction's result set in paged, compressed form.
+
+        Args:
+            interaction_id: ID of the interaction this result belongs to
+            rows: list[dict] rows of data
+            columns: list[str] column names (if None, inferred from first row)
+            page_size: number of rows per page stored
+        """
+        try:
+            rows = rows or []
+            if not columns:
+                if rows and isinstance(rows, list) and isinstance(rows[0], dict):
+                    columns = list(rows[0].keys())
+                else:
+                    columns = []
+
+            total_rows = len(rows)
+            total_columns = len(columns)
+
+            with self.db_engine.begin() as connection:
+                # Clear any previous pages/meta for this interaction
+                connection.execute(
+                    self.interaction_result_pages_table.delete().where(
+                        self.interaction_result_pages_table.c.interaction_id == interaction_id
+                    )
+                )
+                connection.execute(
+                    self.interaction_results_table.delete().where(
+                        self.interaction_results_table.c.interaction_id == interaction_id
+                    )
+                )
+
+                # Insert meta
+                connection.execute(
+                    self.interaction_results_table.insert().values(
+                        interaction_id=interaction_id,
+                        total_rows=total_rows,
+                        total_columns=total_columns,
+                        columns_json=json.dumps(columns),
+                        page_size=page_size
+                    )
+                )
+
+                # Insert pages
+                if total_rows > 0:
+                    page_index = 0
+                    for start in range(0, total_rows, page_size):
+                        end = min(start + page_size, total_rows)
+                        page_rows = rows[start:end]
+                        payload = json.dumps(page_rows, default=str).encode("utf-8")
+                        comp = gzip.compress(payload)
+                        b64 = base64.b64encode(comp).decode("ascii")
+                        connection.execute(
+                            self.interaction_result_pages_table.insert().values(
+                                interaction_id=interaction_id,
+                                page_index=page_index,
+                                row_start=start,
+                                row_end=end - 1,
+                                rows_gzip_base64=b64
+                            )
+                        )
+                        page_index += 1
+            return True
+        except Exception as e:
+            raise Exception(f"Error storing interaction result: {e}")
+
+    def get_interaction_result_meta(self, interaction_id: str):
+        """Returns metadata about stored result pages for an interaction."""
+        try:
+            with self.db_engine.connect() as connection:
+                row = connection.execute(
+                    self.interaction_results_table.select().where(
+                        self.interaction_results_table.c.interaction_id == interaction_id
+                    )
+                ).fetchone()
+                if not row:
+                    return {
+                        "interaction_id": interaction_id,
+                        "total_rows": 0,
+                        "total_columns": 0,
+                        "columns": [],
+                        "page_size": 0,
+                        "total_pages": 0,
+                    }
+                meta = dict(row._mapping)
+                columns = []
+                try:
+                    columns = json.loads(meta.get("columns_json") or "[]")
+                except Exception:
+                    columns = []
+                # Derive page count from pages table for robustness
+                page_count = connection.execute(
+                    text("SELECT COUNT(*) FROM interaction_result_pages WHERE interaction_id = :iid"),
+                    {"iid": interaction_id},
+                ).scalar_one()
+                return {
+                    "interaction_id": interaction_id,
+                    "total_rows": meta.get("total_rows", 0),
+                    "total_columns": meta.get("total_columns", 0),
+                    "columns": columns,
+                    "page_size": meta.get("page_size", 0),
+                    "total_pages": int(page_count),
+                }
+        except Exception as e:
+            raise Exception(f"Error fetching interaction result meta: {e}")
+
+    def get_interaction_result_page(self, interaction_id: str, page: int = 0, page_size: int | None = None):
+        """Returns a specific page of rows for an interaction result."""
+        try:
+            with self.db_engine.connect() as connection:
+                rec = connection.execute(
+                    self.interaction_result_pages_table.select()
+                    .where(self.interaction_result_pages_table.c.interaction_id == interaction_id)
+                    .where(self.interaction_result_pages_table.c.page_index == page)
+                ).fetchone()
+                if not rec:
+                    return {
+                        "interaction_id": interaction_id,
+                        "page_index": page,
+                        "row_start": 0,
+                        "row_end": 0,
+                        "rows": []
+                    }
+                r = dict(rec._mapping)
+                try:
+                    comp = base64.b64decode(r.get("rows_gzip_base64") or "")
+                    payload = gzip.decompress(comp)
+                    rows = json.loads(payload.decode("utf-8"))
+                except Exception:
+                    rows = []
+                return {
+                    "interaction_id": interaction_id,
+                    "page_index": r.get("page_index"),
+                    "row_start": r.get("row_start"),
+                    "row_end": r.get("row_end"),
+                    "rows": rows,
+                }
+        except Exception as e:
+            raise Exception(f"Error fetching interaction result page: {e}")
 
     def create_templates_table(self):
         return Table(

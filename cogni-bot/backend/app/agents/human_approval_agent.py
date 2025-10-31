@@ -6,6 +6,7 @@ Human Approval Agent for Intent Validation (Dialogue Manager)
 import re
 from typing import Any, Dict, List
 from langchain_core.language_models import BaseLanguageModel
+from app.schemas.followups import FollowUpQuestion
 from collections import defaultdict
 
 # spaCy import with fallback
@@ -44,10 +45,24 @@ class HumanApprovalAgent:
         else:
             print("[HumanApprovalAgent] spaCy not available, using regex-based extraction")
         
-    def _find_competing_columns(self, user_question: str, knowledge_data: Dict) -> List[Dict]:
+    def _find_competing_columns(self, user_question: str, knowledge_data: Dict, intent: Dict = None) -> List[Dict]:
         """
         Finds ambiguity ONLY in the potential ATTRIBUTES of a query, not the subject.
+        
+        If intent picker has high confidence and already selected columns, trust that decision
+        and skip ambiguity detection.
         """
+        # Trust intent picker's high-confidence decision
+        if intent:
+            confidence = intent.get('confidence', {}).get('overall', 0.0)
+            selected_columns = intent.get('columns', [])
+            
+            # If intent picker has high confidence (>= 0.9) and already selected specific columns,
+            # trust that decision and skip ambiguity detection
+            if confidence >= 0.9 and selected_columns:
+                print(f"[HumanApprovalAgent] Intent picker has high confidence ({confidence}) and selected columns: {selected_columns}. Trusting decision and skipping ambiguity check.")
+                return []
+        
         # Check if this is a relationship question first
         if self._is_relationship_question(user_question):
             print(f"[HumanApprovalAgent] Question is about relationships, skipping ambiguity check")
@@ -266,7 +281,8 @@ class HumanApprovalAgent:
             
             # --- DUTY 1: Proactively and Independently Check for Ambiguity ---
             # This now correctly ignores relationship questions and focuses on attributes.
-            competing_columns = self._find_competing_columns(user_question, knowledge_data)
+            # Pass intent so we can trust high-confidence decisions from intent picker
+            competing_columns = self._find_competing_columns(user_question, knowledge_data, intent)
             
             if competing_columns:
                 # --- ACTION A: Ambiguity Found -> Force Clarification ---
@@ -283,8 +299,12 @@ class HumanApprovalAgent:
                 
                 print(f"[HumanApprovalAgent] Asking for clarification: {approval_request['clarification_details']['question_text']}")
                 print(f"[HumanApprovalAgent] Available options: {[opt['display_name'] for opt in options]}")
-                
-                return {**state, 'human_approval_needed': True, 'approval_request': approval_request, '__interrupt__': True}
+                follow_up = FollowUpQuestion(
+                    question=approval_request['clarification_details']['question_text'],
+                    answer_options=[opt['display_name'] for opt in options],
+                    multiple_selection=False,
+                ).model_dump()
+                return {**state, 'human_approval_needed': True, 'approval_request': approval_request, 'follow_up_questions': [follow_up], '__interrupt__': True}
 
             # --- DUTY 2: If No Ambiguity, Decide Whether to Proceed Automatically or Ask for Confirmation ---
             confidence = intent.get('confidence', {}).get('overall', 0.0)
@@ -327,8 +347,12 @@ class HumanApprovalAgent:
                 
             print(f"[HumanApprovalAgent] Asking for confirmation: {approval_request['clarification_details']['question_text']}")
             print(f"[HumanApprovalAgent] Available options: {[opt['display_name'] for opt in approval_request['clarification_details']['options']]}")
-            
-            return {**state, 'human_approval_needed': True, 'approval_request': approval_request, '__interrupt__': True}
+            follow_up = FollowUpQuestion(
+                question=approval_request['clarification_details']['question_text'],
+                answer_options=[opt['display_name'] for opt in approval_request['clarification_details']['options']],
+                multiple_selection=False,
+            ).model_dump()
+            return {**state, 'human_approval_needed': True, 'approval_request': approval_request, 'follow_up_questions': [follow_up], '__interrupt__': True}
             
         except Exception as e:
             print(f"[HumanApprovalAgent] Error during approval check: {e}")

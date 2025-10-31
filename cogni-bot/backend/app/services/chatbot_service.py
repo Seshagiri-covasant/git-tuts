@@ -761,11 +761,10 @@ def update_semantic_schema_service(chatbot_id: str):
     print(f"UPDATE SEMANTIC SCHEMA: Updating schema for chatbot {chatbot_id}")
     print(f"Schema keys: {list(semantic_schema_data.keys()) if isinstance(semantic_schema_data, dict) else 'Not a dict'}")
     print(f"Tables: {len(semantic_schema_data.get('tables', {}))}")
-    print(f"Metrics: {len(semantic_schema_data.get('metrics', []))}")
-    print(f"Metrics data: {semantic_schema_data.get('metrics', [])}")
+
     
     # 🔍 LOG PRIORITY FIELDS: Check for priority fields in incoming schema
-    print(" PRIORITY FIELDS DEBUG: Checking incoming schema for priority fields...")
+
     print(f" SCHEMA KEYS: {list(semantic_schema_data.keys())}")
     print(f" TABLES COUNT: {len(semantic_schema_data.get('tables', {}))}")
     
@@ -1401,3 +1400,35 @@ def import_semantic_schema_service(chatbot_id: str):
     except Exception as import_error:
         logger.error(f"Failed to import semantic schema for chatbot {chatbot_id}: {str(import_error)}")
         raise ServiceException(f"Failed to import schema: {str(import_error)}", 500)
+
+
+def register_chatbot_service(chatbot_id: str):
+    """Register external clientId/projectId mapping for a chatbot."""
+    try:
+        # Validate request body
+        validated_data = api_schemas.ChatbotRegisterSchema().load(request.get_json())
+        client_id = validated_data['clientId']
+        project_id = validated_data['projectId']
+    except ValidationError as err:
+        raise ServiceException(f"Invalid request body: {err.messages}", 400)
+    
+    # Validate chatbot exists
+    chatbot = get_chatbot_with_validation(chatbot_id)
+    
+    # Update chatbot with external IDs
+    db = get_chatbot_db()
+    updated_chatbot = db.update_chatbot(
+        chatbot_id=chatbot_id,
+        client_id=client_id,
+        project_id=project_id
+    )
+    
+    if not updated_chatbot:
+        raise ServiceException(f"Failed to update chatbot {chatbot_id}", 500)
+    
+    return {
+        "chatbot_id": chatbot_id,
+        "clientId": client_id,
+        "projectId": project_id,
+        "message": "External IDs registered successfully"
+    }

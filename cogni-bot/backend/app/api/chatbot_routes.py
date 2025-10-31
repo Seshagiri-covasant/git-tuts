@@ -154,3 +154,10 @@ def import_chatbot_semantic_schema(chatbot_id):
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@app.route("/chatbots/<chatbot_id>/register", methods=["POST"])
+def register_chatbot_external_ids(chatbot_id):
+    """Attaches external clientId/projectId mapping to a chatbot."""
+    result = chatbot_service.register_chatbot_service(chatbot_id)
+    return jsonify({"message": "Chatbot registered successfully", **result}), 200

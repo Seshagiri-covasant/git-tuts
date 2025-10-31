@@ -287,3 +287,138 @@ def get_interaction_count_service(conversation_id: str):
     db = get_chatbot_db()
     count = db.get_interaction_count(conversation_id)
     return {"count": count}
+
+
+def start_unified_interaction_service():
+    """Unified entry point: resolve chatbot via client-id/project-id headers or chatbot_id in body, then process a message.
+
+    Accepts (orchestrator format):
+      - Headers: client-id, project-id (kebab-case) OR clientId, projectId (camelCase - backward compatible)
+      - Body: { query (or message), thread_id (or conversation_id), chatbot_id? }
+    
+    Fully compatible with orchestrator API contract.
+    """
+    from marshmallow import ValidationError
+    try:
+        payload = request.get_json() or {}
+        
+        # --- FIX 1: Support BOTH kebab-case and camelCase headers ---
+        # Orchestrator sends 'client-id' and 'project-id' (kebab-case)
+        # Also support 'clientId'/'projectId' (camelCase) for backward compatibility
+        client_id = (
+            request.headers.get('client-id') or 
+            request.headers.get('clientId') or 
+            request.headers.get('Client-Id') or
+            payload.get('clientId') or
+            payload.get('client-id')
+        )
+        project_id = (
+            request.headers.get('project-id') or 
+            request.headers.get('projectId') or 
+            request.headers.get('Project-Id') or
+            payload.get('projectId') or
+            payload.get('project-id')
+        )
+        
+        chatbot_id = payload.get('chatbot_id')
+        
+        # --- FIX 2: Support BOTH 'query' (orchestrator) and 'message' (legacy) ---
+        user_question = payload.get('query') or payload.get('message')
+        
+        # Optional functional context from orchestrator headers
+        module_hdr = request.headers.get('Module')
+        submodule_hdr = request.headers.get('Submodule')
+        
+        # --- FIX 3: Support BOTH 'thread_id' (orchestrator) and 'conversation_id' (legacy) ---
+        conversation_id = payload.get('thread_id') or payload.get('conversation_id')
+
+        if not user_question or not isinstance(user_question, str) or not user_question.strip():
+            raise ValidationError({"query": ["Missing or empty 'query' field."]})
+
+        db = get_chatbot_db()
+
+        # Resolve chatbot_id via mapping if not provided explicitly
+        if not chatbot_id:
+            if client_id and project_id:
+                chatbot_row = db.find_chatbot_by_external_ids(client_id, project_id)
+                if not chatbot_row:
+                    raise ServiceException("No chatbot mapped for provided client-id/project-id", 404)
+                chatbot_id = chatbot_row.get('chatbot_id')
+            else:
+                raise ServiceException("Request must include client-id/project-id headers or a chatbot_id in the body", 400)
+
+        # Validate chatbot and status
+        chatbot = get_chatbot_with_validation(chatbot_id)
+        validate_chatbot_status(chatbot, "ready")
+
+        # Ensure conversation exists (create if missing)
+        if not conversation_id:
+            conv = db.create_conversation(
+                chatbot_id=chatbot_id,
+                conversation_name=f"Orchestrator Chat: {user_question[:30]}...",
+                status="active",
+                owner=client_id or "unified_user"
+            )
+            conversation_id = conv.get("conversationId")
+
+        # Execute via agent
+        agent = get_agent(chatbot_id)
+        effective_llm_name = chatbot.get("current_llm_name")
+        temperature = chatbot.get("temperature", 0.7)
+
+        # Mirror Module/Submodule into message context if provided
+        if module_hdr or submodule_hdr:
+            prefix_parts = []
+            if module_hdr:
+                prefix_parts.append(f"Module={module_hdr}")
+            if submodule_hdr:
+                prefix_parts.append(f"Submodule={submodule_hdr}")
+            prefix = "[" + "; ".join(prefix_parts) + "] "
+            message_for_agent = f"{prefix}{user_question}"
+        else:
+            message_for_agent = user_question
+
+        agent_response = agent.execute(
+            conversation_id, message_for_agent, effective_llm_name, temperature=temperature)
+        if not agent_response:
+            raise ServiceException("No response from agent", 500)
+
+        # Check for clarification or approval BEFORE processing interaction
+        if agent_response.get("question"):
+            return {
+                "question": agent_response["question"],
+                "interaction_type": "clarification",
+                "thread_id": conversation_id,  # Return thread_id for orchestrator
+            }
+
+        if agent_response.get("human_approval_needed"):
+            return {
+                "approval_request": agent_response.get("approval_request", {}),
+                "clarification_questions": agent_response.get("clarification_questions", []),
+                "similar_columns": agent_response.get("similar_columns", []),
+                "ambiguity_analysis": agent_response.get("ambiguity_analysis", {}),
+                "interaction_type": "human_approval",
+                "thread_id": conversation_id,  # Return thread_id for orchestrator
+            }
+
+        # Persist interaction and process response
+        with monitored_database_operation("create_interaction", "chatbot_main"):
+            interaction = db.create_interaction(conversation_id, user_question, agent_response)
+
+        # Process the agent response
+        processed_response = _process_agent_response(agent_response, interaction, db)
+        
+        # --- FIX 4: Return thread_id instead of conversation_id for orchestrator compatibility ---
+        # Add thread_id to response for orchestrator
+        processed_response["thread_id"] = conversation_id
+        
+        # Keep conversation_id for backward compatibility with direct API clients
+        # Orchestrator should use thread_id, but both are present for flexibility
+        
+        return processed_response
+    except ValidationError as err:
+        raise ServiceException(f"Invalid request body: {err.messages}", 400)
+    except ServiceException:
+        raise
+    except Exception as e:
+        raise ServiceException(f"Failed to process unified interaction: {str(e)}", 500)

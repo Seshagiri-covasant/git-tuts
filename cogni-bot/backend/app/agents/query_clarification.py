@@ -5,6 +5,7 @@ import logging
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.language_models import BaseLanguageModel
 from app.repositories.chatbot_db_util import ChatbotDbUtil
+from app.schemas.followups import FollowUpQuestion
 
 
 class ConversationalClarificationAgent:
@@ -52,12 +53,12 @@ class ConversationalClarificationAgent:
             
             if clarification_needed:
                 print(f"[ConversationalClarification] Asking for clarification: {clarification_question}")
-                return {
-                    **state,
-                    'clarification_needed': True,
-                    'clarification_question': clarification_question,
-                    'conversation_context': conversation_context
-                }
+                follow_up = FollowUpQuestion(
+                    question=clarification_question or "Could you provide more details?",
+                    answer_options=[],
+                    multiple_selection=False,
+                ).model_dump()
+                return {**state, 'clarification_needed': True, 'clarification_question': clarification_question, 'conversation_context': conversation_context, 'follow_up_questions': [follow_up]}
             else:
                 print(f"[ConversationalClarification] No clarification needed, proceeding with intent")
                 return {

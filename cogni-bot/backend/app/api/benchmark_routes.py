@@ -31,8 +31,6 @@ def get_performance_metrics_route(chatbot_id):
 def cleanup_benchmark_data_route(chatbot_id):
     return jsonify(benchmark_service.cleanup_benchmark_data_service(chatbot_id))
 
-# --- Custom Test Suite Routes ---
-
 
 @app.route('/chatbots/<chatbot_id>/custom-tests', methods=['POST'])
 def create_custom_test_route(chatbot_id):

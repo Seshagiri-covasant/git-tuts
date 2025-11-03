@@ -2,6 +2,9 @@ import logging
 import json
 from flask import request
 from marshmallow import ValidationError
+from sqlalchemy import inspect
+from ..repositories.app_db_util import AppDbUtil
+from uuid import UUID
 
 from ..schemas import api_schemas
 from ..utils.exceptions import ServiceException
@@ -332,6 +335,14 @@ def start_unified_interaction_service():
         # --- FIX 3: Support BOTH 'thread_id' (orchestrator) and 'conversation_id' (legacy) ---
         conversation_id = payload.get('thread_id') or payload.get('conversation_id')
 
+        # Helper: validate UUIDs (ignore placeholders like 'default_thread')
+        def _is_valid_uuid(v):
+            try:
+                UUID(str(v))
+                return True
+            except Exception:
+                return False
+
         if not user_question or not isinstance(user_question, str) or not user_question.strip():
             raise ValidationError({"query": ["Missing or empty 'query' field."]})
 
@@ -351,8 +362,8 @@ def start_unified_interaction_service():
         chatbot = get_chatbot_with_validation(chatbot_id)
         validate_chatbot_status(chatbot, "ready")
 
-        # Ensure conversation exists (create if missing)
-        if not conversation_id:
+        # Ensure conversation exists (create if missing or invalid/nonexistent)
+        if not conversation_id or not _is_valid_uuid(conversation_id):
             conv = db.create_conversation(
                 chatbot_id=chatbot_id,
                 conversation_name=f"Orchestrator Chat: {user_question[:30]}...",
@@ -360,8 +371,85 @@ def start_unified_interaction_service():
                 owner=client_id or "unified_user"
             )
             conversation_id = conv.get("conversationId")
+        else:
+            try:
+                _ = get_conversation_by_id_service(conversation_id)
+            except ServiceException:
+                conv = db.create_conversation(
+                    chatbot_id=chatbot_id,
+                    conversation_name=f"Orchestrator Chat: {user_question[:30]}...",
+                    status="active",
+                    owner=client_id or "unified_user"
+                )
+                conversation_id = conv.get("conversationId")
 
-        # Execute via agent
+        # Quick metadata intent: "what are the tables" (no hardcoded names)
+        ql = (user_question or "").strip().lower()
+        wants_tables = any(
+            phrase in ql for phrase in [
+                "what are the tables",
+                "what are the table names",
+                "list tables",
+                "show tables",
+                "table names"
+            ]
+        )
+
+        if wants_tables:
+            try:
+                # Build a transient connection to application DB using chatbot config
+                app_db = AppDbUtil(
+                    chatbot.get("db_url"),
+                    credentials_json=chatbot.get("credentials_json")
+                )
+                with app_db.db_engine.connect() as _conn:
+                    insp = inspect(app_db.db_engine)
+                    schema_name = chatbot.get("schema_name")
+                    # Try inspector first
+                    try:
+                        table_names = insp.get_table_names(schema=schema_name)
+                    except Exception:
+                        table_names = []
+
+                    # Dialect-specific fallback if inspector yielded nothing
+                    if not table_names:
+                        try:
+                            dialect = app_db.db_engine.dialect.name.lower()
+                            if dialect == 'mssql':
+                                rs = _conn.exec_driver_sql(
+                                    "SELECT t.name FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = :schema",
+                                    {'schema': schema_name or 'dbo'}
+                                )
+                                table_names = [r[0] for r in rs]
+                            elif dialect in ('postgresql', 'mysql'):
+                                rs = _conn.exec_driver_sql(
+                                    "SELECT table_name FROM information_schema.tables WHERE table_schema = :schema",
+                                    {'schema': schema_name or 'public'}
+                                )
+                                table_names = [r[0] for r in rs]
+                        except Exception:
+                            table_names = []
+
+                # Persist a synthetic interaction with the table list
+                tables_payload = {"data": [{"table": t} for t in sorted(set(table_names))],
+                                  "metadata": {"columns": ["table"], "row_count": len(table_names)}}
+                agent_response = {
+                    "final_result": json.dumps(tables_payload),
+                    "cleaned_query": None,
+                    "raw_result_set": tables_payload.get("data")
+                }
+
+                with monitored_database_operation("create_interaction", "chatbot_main"):
+                    interaction = db.create_interaction(conversation_id, user_question, agent_response)
+
+                processed_response = _process_agent_response(agent_response, interaction, db)
+                processed_response["thread_id"] = conversation_id
+                return processed_response
+            except Exception as meta_err:
+                # Fall back to normal agent path if metadata lookup fails
+                logging.error(f"Metadata tables lookup failed: {meta_err}")
+
+        # Execute via agent for all other cases
         agent = get_agent(chatbot_id)
         effective_llm_name = chatbot.get("current_llm_name")
         temperature = chatbot.get("temperature", 0.7)

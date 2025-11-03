@@ -205,3 +205,6 @@ for cb in chatbots:
 **Error: "Failed to update chatbot"**
 - Check database connection
 - Verify chatbot table structure has `client_id` and `project_id` columns
+
+
+

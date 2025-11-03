@@ -190,23 +190,80 @@ class QueryGeneratorAgent:
         if not schema_name or db_type not in ("postgresql", "mssql"):
             return sql
         import re as _re
+        
+        # CRITICAL: Only qualify table identifiers, NOT string literals or other parts
+        # Split SQL into parts to avoid matching inside string literals
+        # Simple approach: Find all string literals and protect them, then qualify tables
+        
+        # Protect string literals by temporarily replacing them
+        # This prevents schema qualification from modifying values inside quotes
+        string_literals = []
+        # Match single-quoted strings (handles escaped quotes with '')
+        # Match double-quoted strings (handles escaped quotes with \")
+        string_pattern = _re.compile(r"('(?:''|[^'])*')|(\"(?:\\\"|[^\"])*\")", _re.IGNORECASE)
+        protected_sql = sql
+        placeholder_idx = 0
+        
+        def _protect_string(match):
+            nonlocal placeholder_idx
+            literal = match.group(0)
+            placeholder = f"__STRING_LITERAL_{placeholder_idx}__"
+            string_literals.append(literal)
+            placeholder_idx += 1
+            return placeholder
+        
+        # Protect all string literals first - this prevents modification of values inside quotes
+        protected_sql = string_pattern.sub(_protect_string, protected_sql)
+        
         def _qualify(match):
             kw = match.group(1)
             ident = match.group(2)
             rest = match.group(3) or ""
-            # If already qualified or quoted with schema, leave
-            if '.' in ident or ident.startswith('"') or ident.startswith('['):
+            # If already qualified with schema (has schema.table), leave it
+            if '.' in ident and (ident.count('.') >= 2 or (ident.count('.') == 1 and (ident.startswith('"') or ident.startswith('[')))):
                 return f"{kw} {ident}{rest}"
-            if db_type == "postgresql":
-                qualified = f'"{schema_name}"."{ident}"'
-            else:
-                qualified = f'[{schema_name}].[{ident}]'
-            return f"{kw} {qualified}{rest}"
+            # If already quoted/bracketed but not schema-qualified, add schema
+            if db_type == "mssql":
+                # MSSQL: Handle [table] -> [schema].[table]
+                if ident.startswith('[') and ident.endswith(']'):
+                    table_name = ident[1:-1]  # Remove brackets
+                    if '.' not in table_name:  # Not already schema.table
+                        qualified = f'[{schema_name}].[{table_name}]'
+                        return f"{kw} {qualified}{rest}"
+            elif db_type == "postgresql":
+                # PostgreSQL: Handle "table" -> "schema"."table"
+                if ident.startswith('"') and ident.endswith('"'):
+                    table_name = ident[1:-1]  # Remove quotes
+                    if '.' not in table_name:  # Not already schema.table
+                        qualified = f'"{schema_name}"."{table_name}"'
+                        return f"{kw} {qualified}{rest}"
+            # Plain identifier without quotes
+            if '.' not in ident:
+                if db_type == "postgresql":
+                    qualified = f'"{schema_name}"."{ident}"'
+                else:
+                    qualified = f'[{schema_name}].[{ident}]'
+                return f"{kw} {qualified}{rest}"
+            return f"{kw} {ident}{rest}"
 
         # Qualify identifiers in FROM and JOIN clauses when unqualified
-        pattern = _re.compile(r"\b(FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)(\s+AS\b|\s+|$)", _re.IGNORECASE)
-        sql = _re.sub(pattern, _qualify, sql)
-        return sql
+        # Pattern matches: FROM/JOIN followed by identifier (with optional brackets/quotes) and optional AS alias
+        if db_type == "mssql":
+            # MSSQL: Match [table] or table (both patterns)
+            pattern = _re.compile(r"\b(FROM|JOIN)\s+(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*)(\s+AS\b|\s+|$)", _re.IGNORECASE)
+        else:
+            # PostgreSQL: Match "table" or table
+            pattern = _re.compile(r"\b(FROM|JOIN)\s+(\"[A-Za-z_][A-Za-z0-9_]*\"|[A-Za-z_][A-Za-z0-9_]*)(\s+AS\b|\s+|$)", _re.IGNORECASE)
+        
+        # Apply qualification to protected SQL
+        qualified_sql = _re.sub(pattern, _qualify, protected_sql)
+        
+        # Restore string literals
+        for idx, literal in enumerate(string_literals):
+            placeholder = f"__STRING_LITERAL_{idx}__"
+            qualified_sql = qualified_sql.replace(placeholder, literal)
+        
+        return qualified_sql
 
     def _extract_sql_from_response(self, response):
         """Extract clean SQL from LLM response, removing markdown fences and explanations."""
@@ -770,6 +827,15 @@ Output ONLY the final SQL query, no explanations."""
                     qualified_base = self._qualify_table(db_type, base_table, selected_schema)
                     scaffold_parts = [f"FROM {qualified_base} AS {base_table}"]
                     joins_spec = intent.get('joins') or []
+                    
+                    # CRITICAL FIX: Only add JOINs if explicitly specified in intent
+                    # Do not assume JOINs are needed - many queries can be answered with a single table
+                    # Only use JOINs if:
+                    # 1. Intent explicitly specifies joins, OR
+                    # 2. Required columns span multiple tables (but let LLM decide if needed)
+                    if not joins_spec:
+                        # No JOINs specified in intent - return simple FROM clause only
+                        return scaffold_parts[0]
 
                     # Helper to backtick qualified identifiers in ON strings
                     import re as _re
@@ -823,6 +889,35 @@ Output ONLY the final SQL query, no explanations."""
                 except Exception:
                     allowed_tables = []
             allowed_tables_str = ", ".join([f'"{t}"' for t in allowed_tables]) if allowed_tables else ""
+
+            # CRITICAL FIX: Extract actual column names from schema for intent-selected tables
+            # This prevents hallucination of non-existent columns
+            actual_columns_by_table = {}
+            if intent_tables and state.get('knowledge_data'):
+                schema = state.get('knowledge_data', {}).get('schema', {})
+                tables_data = schema.get('tables', {})
+                
+                for table_name in intent_tables:
+                    if table_name in tables_data:
+                        table_info = tables_data[table_name]
+                        columns = table_info.get('columns', {})
+                        # Extract actual column names
+                        actual_columns = list(columns.keys()) if isinstance(columns, dict) else []
+                        actual_columns_by_table[table_name] = actual_columns
+                        print(f"[QueryGenerator] Table '{table_name}' has {len(actual_columns)} columns available")
+            
+            # Build explicit column list for prompt enforcement
+            actual_columns_text = ""
+            if actual_columns_by_table:
+                actual_columns_text = "\n\n=== Available Column Names (USE ONLY THESE) ===\n"
+                for table_name, cols in actual_columns_by_table.items():
+                    if cols:
+                        # Show more columns (up to 100) so date columns are visible
+                        cols_display = cols[:100]
+                        actual_columns_text += f"\n{table_name}:\n  {', '.join(cols_display)}\n"
+                        if len(cols) > 100:
+                            actual_columns_text += f"  ... and {len(cols) - 100} more columns\n"
+                actual_columns_text += "\n=== Use ONLY column names listed above ===\n\n"
 
             # Determine relationship limit based on prompt size estimation
             relationships = clipped.get('relationships', [])
@@ -900,33 +995,52 @@ STRICT REQUIREMENTS:
 INTENT ANALYSIS:
 {intent_text}
 
+CRITICAL: INTENT FILTERS (USE THESE EXACTLY):
+{chr(10).join('- ' + str(f) for f in intent.get('filters', [])) if intent.get('filters') else 'No filters specified in intent'}
+⚠️ IMPORTANT: The filters above are ready-to-use SQL WHERE conditions selected by the Intent Picker. 
+- USE THESE FILTERS EXACTLY AS SHOWN in your WHERE clause
+- DO NOT modify them, replace them, or create new filters
+- DO NOT use placeholder column names from examples (like [flag_column_for_embargoed])
+- DO NOT create subqueries or JOINs - use the provided filter conditions directly
+
+AVAILABLE TABLES (USE ONLY THESE):
+{allowed_tables_str if allowed_tables_str else 'None - check intent selected tables'}
+
 AVAILABLE CONTEXT:
 {clipped_text}
 
- FROM/JOIN SCAFFOLD (MANDATORY TO KEEP UNCHANGED):
+ FROM/JOIN SCAFFOLD:
  {from_join_scaffold if from_join_scaffold else '(no scaffold available)'}
 
 QUESTION: {question}
 
-INSTRUCTIONS:
- 1. Analyze the question and intent to understand what data is needed
- 2. Use the provided FROM/JOIN SCAFFOLD verbatim (do not change it). If no scaffold shown, you must include a correct FROM base table and JOIN ... ON ... blocks.
- 3. Add SELECT (with qualified columns), WHERE (if filters exist), GROUP BY (for any non-aggregated columns), ORDER BY, and row limiting as needed.
- 4. Generate syntactically correct {db_type.upper()} SQL.
- 5. Use proper table aliases for clarity and qualify all columns.
- 6. Preserve identifiers' casing and spacing exactly as shown in context/samples.
- 7. IMPORTANT: If INTENT AGGREGATIONS contains specific metric names, use those exact metric names in your SQL instead of raw column names.
- 8. ROW LIMITING SYNTAX BY DATABASE:
-    - For MSSQL: Use "ORDER BY column DESC OFFSET 0 ROWS FETCH NEXT N ROWS ONLY" instead of LIMIT
-    - For MySQL/PostgreSQL: Use "LIMIT N"
-    - For BigQuery: Use "LIMIT N"
-    - For SQLite: Use "LIMIT N"
+INTENT SELECTED COLUMNS: {intent.get('columns', [])}
+{actual_columns_text}
 
-TOP QUERY HANDLING:
-- When the question contains "top" , automatically add row limiting
-- Default to TOP 10 if no specific number is mentioned.
-- If a specific number is mentioned , use that number
-- Always include ORDER BY with DESC for "top" queries to get the highest values first
+INSTRUCTIONS:
+Generate syntactically correct {db_type.upper()} SQL.
+
+IMPORTANT ABOUT EXAMPLES:
+- The examples below show SQL PATTERNS and STRUCTURE only
+- The column names in examples (like InvoiceDate, RecordDate, CustomerID, OrderID, etc.) are PLACEHOLDERS
+- DO NOT use column names from examples - they don't exist in your database
+- ALWAYS use column names from the "=== Available Column Names ===" section above
+- For date columns in ORDER BY, check the "Available Column Names" list to find the actual date column name
+
+CRITICAL TABLE VALIDATION:
+- Use ONLY tables listed in "AVAILABLE TABLES (USE ONLY THESE)" section above
+- DO NOT reference tables that are NOT in that list (like RestrictedEmbargoedCountries, ComplianceTables, etc.)
+- If a filter mentions joining to a table not in "AVAILABLE TABLES", that table doesn't exist - use flag columns instead
+- For "restricted", "embargoed", "compliance" questions - look for flag columns in "Available Column Names" (like P2PHRIN305, P2PHRIN302, etc.) instead of joining to non-existent tables
+
+CRITICAL: USE INTENT FILTERS DIRECTLY:
+- The "INTENT FILTERS" section above contains the EXACT filter conditions selected by the Intent Picker
+- USE THESE FILTERS EXACTLY AS PROVIDED in your WHERE clause
+- DO NOT replace them with placeholder column names from examples (like [flag_column_for_embargoed])
+- DO NOT create new filters or subqueries - use the filters from "INTENT FILTERS" section
+- For flag columns (like P2PHRIN305, P2PFMIN*, P2PACIN*), the filter value should be 'True' (not description text)
+
+For MSSQL: Use "ORDER BY column DESC OFFSET 0 ROWS FETCH NEXT N ROWS ONLY" instead of LIMIT.
 
 DYNAMIC AGGREGATION PATTERNS:
 {self._build_aggregation_patterns_section(aggregation_patterns, question)}
@@ -934,11 +1048,147 @@ DYNAMIC AGGREGATION PATTERNS:
 AI PREFERENCES:
 {self._build_ai_preferences_section(ai_preferences)}
 
-COMPLEX AGGREGATION PATTERNS:
-- For percentage questions: Use COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () for percentages
-- For "high" values: Use CTEs with AVG() to calculate thresholds, then filter WHERE column > threshold
-- For comparisons (vs, versus): Use GROUP BY with the comparison column
-- For breakdowns: Use GROUP BY with appropriate categorical columns
+EXAMPLES OF CORRECT SQL GENERATION PATTERNS (These are GENERIC examples showing patterns only - DO NOT use these exact column names):
+
+Example 1: Simple Filter with Top N
+Question: "Which orders have a total amount above 1000?"
+Pattern: Filter on numeric column, use TOP for limiting, order by relevant column
+SQL Pattern:
+SELECT TOP 10 
+    [identifier_column], 
+    [name_column], 
+    [amount_column] 
+FROM [table_name] 
+WHERE [amount_column] > 1000 
+ORDER BY [amount_column] DESC
+Note: Replace [identifier_column], [name_column], [amount_column], [table_name] with actual column/table names from "Available Column Names" above.
+
+Example 2: Above Average Comparison
+Question: "Which customers have above average order value?"
+Pattern: Use subquery to calculate average, compare in WHERE clause
+SQL Pattern:
+SELECT TOP 10 
+    [id_column], 
+    [name_column], 
+    [value_column] 
+FROM [table_name] 
+WHERE [value_column] > (SELECT AVG([value_column]) FROM [table_name]) 
+ORDER BY [value_column] DESC
+Note: Replace placeholders with actual column names from "Available Column Names" above.
+
+Example 3: Time-Based Trend Analysis (CTE with Window Functions)
+Question: "Which customers have had increasing order values over the last 12 months?"
+Pattern: Use CTE to calculate monthly averages, use ROW_NUMBER to track trends, JOIN to compare first/last
+SQL Pattern:
+WITH MonthlyValues AS (
+    SELECT
+        [id_column],
+        YEAR([date_column]) AS YearValue,
+        MONTH([date_column]) AS MonthValue,
+        AVG([amount_column]) AS AvgMonthlyAmount
+    FROM [table_name]
+    WHERE [date_column] >= DATEADD(MONTH, -12, GETDATE())
+    GROUP BY [id_column], YEAR([date_column]), MONTH([date_column])
+),
+RankedValues AS (
+    SELECT
+        [id_column],
+        AvgMonthlyAmount,
+        ROW_NUMBER() OVER (PARTITION BY [id_column] ORDER BY YearValue, MonthValue ASC) AS MonthRank,
+        COUNT(*) OVER (PARTITION BY [id_column]) AS TotalMonths
+    FROM MonthlyValues
+)
+SELECT TOP 10 
+    r1.[id_column],
+    r1.AvgMonthlyAmount AS FirstMonthValue,
+    r2.AvgMonthlyAmount AS LastMonthValue,
+    r2.AvgMonthlyAmount - r1.AvgMonthlyAmount AS ValueChange
+FROM RankedValues r1
+JOIN RankedValues r2
+    ON r1.[id_column] = r2.[id_column]
+    AND r1.MonthRank = 1
+    AND r2.MonthRank = r2.TotalMonths
+WHERE r2.AvgMonthlyAmount > r1.AvgMonthlyAmount
+ORDER BY ValueChange DESC
+Note: Replace all [placeholder] values with actual column names from "Available Column Names" above.
+
+Example 4: Category-Based Aggregation with Average Comparison
+Question: "Are orders with high amounts linked to certain product categories?"
+Pattern: Use CTE for average calculation, GROUP BY category, filter above average, aggregate
+SQL Pattern:
+WITH avg_amount AS (
+    SELECT AVG([amount_column]) AS avg_value
+    FROM [table_name]
+)
+SELECT TOP 10
+    [category_column],
+    COUNT(*) AS OrderCount,
+    AVG([amount_column]) AS AvgOrderAmount
+FROM [table_name], avg_amount
+WHERE [amount_column] > avg_amount.avg_value
+GROUP BY [category_column]
+ORDER BY OrderCount DESC
+Note: Replace [placeholder] values with actual column names from "Available Column Names" above.
+
+Example 5: Boolean Flag Filter with Aggregation
+Question: "Do premium customers sometimes have high order values?"
+Pattern: Filter on boolean flag, compare to average, group and aggregate
+SQL Pattern:
+WITH avg_amount AS (
+    SELECT AVG([amount_column]) AS avg_value
+    FROM [table_name]
+)
+SELECT TOP 10
+    [id_column],
+    [name_column],
+    COUNT(*) AS HighValueOrderCount,
+    MAX([amount_column]) AS MaxOrderAmount
+FROM [table_name], avg_amount
+WHERE [flag_column] = 1
+  AND [amount_column] > avg_amount.avg_value
+GROUP BY [id_column], [name_column]
+ORDER BY HighValueOrderCount DESC
+Note: Replace [placeholder] values with actual column names from "Available Column Names" above.
+
+Example 6: Multiple Condition Filter (OR)
+Question: "Are there orders flagged with any of the compliance flags?"
+Pattern: Multiple OR conditions for flag columns
+SQL Pattern:
+SELECT TOP 10
+    [id_column],
+    [name_column],
+    [flag_column_1],
+    [flag_column_2],
+    [flag_column_3]
+FROM [table_name]
+WHERE [flag_column_1] = 'True'
+   OR [flag_column_2] = 'True'
+   OR [flag_column_3] = 'True'
+ORDER BY [date_column] DESC
+Note: Replace [placeholder] values with actual column names from "Available Column Names" above. Use actual date column name from the list.
+
+Example 7: Count with Boolean Filter
+Question: "How many orders are from customers in restricted regions?"
+Pattern: Simple COUNT with WHERE filter
+SQL Pattern:
+SELECT COUNT(*) AS RestrictedRegionOrderCount
+FROM [table_name]
+WHERE [flag_column] = 'True'
+Note: Replace [placeholder] values with actual column names from "Available Column Names" above.
+
+Example 8: Flag-Based Query (Direct Flag Usage)
+Question: "Are there invoices flagged with compliance issue X?"
+Pattern: When question asks about a specific flag/field mentioned in question, use that flag directly in WHERE clause - no JOIN needed
+SQL Pattern:
+SELECT TOP 10
+    [id_column],
+    [name_column],
+    [number_column],
+    [flag_column]
+FROM [table_name]
+WHERE [flag_column] = 'True'
+ORDER BY [date_column] DESC
+Note: Replace [flag_column] with the actual flag column name from "Available Column Names" (the one mentioned in the question). Replace [date_column] with an actual date column from the list (e.g., if you see PostingDate in the list, use PostingDate - NOT InvoiceDate or RecordDate).
 
 Generate the SQL query:"""
 
